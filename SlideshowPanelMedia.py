@@ -1,4 +1,5 @@
 # Author(s): Dr. Patrick Lemoine
+# Objective: create a video panel, click on the video and play it.
 
 import tkinter as tk
 from PIL import Image, ImageTk
@@ -31,7 +32,7 @@ class Slideshow:
 
     def rgb_to_hex(self, r, g, b):
         if not all(isinstance(c, int) and 0 <= c <= 255 for c in (r, g, b)):
-            raise ValueError("Les valeurs RGB doivent être des entiers entre 0 et 255")
+            raise ValueError("RGB values ​​must be whole between 0 and 255")
         return f"#{r:02x}{g:02x}{b:02x}"
 
     def shadow(self, x, y, w, h):
