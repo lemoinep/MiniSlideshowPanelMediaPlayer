@@ -112,12 +112,15 @@ class Slideshow:
         self.canvas.delete("all")
         self.image_refs.clear()
         screen_width = self.screen_width
-        screen_height = self.screen_height - 150
+        screen_height = self.screen_height - 110
         cols, rows = self.panel_cols, self.panel_rows
-        max_img_width = screen_width // cols - 100
-        max_img_height = screen_height // rows - 20
+        max_img_width = screen_width // cols - 10
+        max_img_height = screen_height // rows - 50
         start_index = self.current_image
-
+        px = (self.screen_width - cols * max_img_width) / 2         
+        py = (self.screen_height - rows * max_img_height) / 2 - 70
+        
+                      
         for i in range(rows):
             for j in range(cols):
                 if not self.images:
@@ -125,8 +128,8 @@ class Slideshow:
                 img_index = (start_index + i * cols + j) % len(self.images)
                 file_path = self.images[img_index]
                 ext = os.path.splitext(file_path)[1].lower()
-                x = j * (screen_width // cols) + 40
-                y = i * (screen_height // rows) + 100
+                x = j * (screen_width // cols) + px 
+                y = i * (screen_height // rows) + py
                 w, h = max_img_width, max_img_height
 
                 if ext in VIDEO_EXTENSIONS:
@@ -148,10 +151,10 @@ class Slideshow:
                     creation_date = self.get_creation_date(file_path)
                     info_text = f"{duration}  |  {creation_date}"
                     self.canvas.create_text(
-                        x + w//2, y + h + 18,
+                        x + w//2, y + h + 20,
                         text=info_text,
                         fill="white",
-                        font=("Helvetica", 11, "bold")
+                        font=("Helvetica", 8, "bold")
                     )
                 else:
                     img = Image.open(file_path)
