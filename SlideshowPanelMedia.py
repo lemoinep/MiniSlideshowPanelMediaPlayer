@@ -146,7 +146,7 @@ class Slideshow:
                     self.image_refs.append(photo_img)
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white",
                                            font=("Helvetica", max(20, w//6), "bold"))
-                    # Addd vignette
+                    # Add vignette
                     duration = self.get_video_duration(file_path)
                     creation_date = self.get_creation_date(file_path)
                     info_text = f"{duration}  |  {creation_date}"
@@ -158,9 +158,16 @@ class Slideshow:
                     )
                 else:
                     img = Image.open(file_path)
+                    width, height = img.size
+                    ratio = min(max_img_width / width, max_img_height / height)
+                    w, h = int(width * ratio), int(height * ratio)
                     img = img.resize((w, h), Image.LANCZOS)
                     photo_img = ImageTk.PhotoImage(img)
-                    self.canvas.create_image(x, y, anchor="nw", image=photo_img)
+                    self.shadow(x, y, w, h)
+                    #self.canvas.create_image(x, y, anchor="nw", image=photo_img)
+                    img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
+                    self.canvas.tag_bind(img_id, "<Button-1>",
+                        lambda e, path=file_path: self.open_with_default_image_viewer(path))
                     self.image_refs.append(photo_img)
 
         self.slider.set(self.current_image)
@@ -174,6 +181,16 @@ class Slideshow:
             subprocess.Popen(['xdg-open', video_path])
         else:
             print("Unsupported OS: cannot open video.")
+
+    def open_with_default_image_viewer(self, image_path):
+        if sys.platform.startswith('darwin'):
+            subprocess.Popen(['open', image_path])
+        elif os.name == 'nt':
+            os.startfile(image_path)
+        elif os.name == 'posix':
+            subprocess.Popen(['xdg-open', image_path])
+        else:
+            print("Unsupported OS: cannot open image.")
 
     def next_image(self):
         if self.images:
