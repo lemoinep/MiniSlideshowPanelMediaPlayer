@@ -117,10 +117,13 @@ class Slideshow:
         max_img_width = screen_width // cols - 10
         max_img_height = screen_height // rows - 50
         start_index = self.current_image
-        px = (self.screen_width - cols * max_img_width) / 2         
-        py = (self.screen_height - rows * max_img_height) / 2 - 70
-        
-                      
+
+        grid_width = cols * max_img_width + (cols - 1) * 10
+        grid_height = rows * max_img_height + (rows - 1) * 10
+
+        px = (screen_width - grid_width) // 2
+        py = (screen_height - grid_height) // 2
+
         for i in range(rows):
             for j in range(cols):
                 if not self.images:
@@ -128,8 +131,9 @@ class Slideshow:
                 img_index = (start_index + i * cols + j) % len(self.images)
                 file_path = self.images[img_index]
                 ext = os.path.splitext(file_path)[1].lower()
-                x = j * (screen_width // cols) + px 
-                y = i * (screen_height // rows) + py
+                # Nouvelle position centrée
+                x = px + j * (max_img_width + 10)
+                y = py + i * (max_img_height + 10)
                 w, h = max_img_width, max_img_height
 
                 if ext in VIDEO_EXTENSIONS:
@@ -146,7 +150,6 @@ class Slideshow:
                     self.image_refs.append(photo_img)
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white",
                                            font=("Helvetica", max(20, w//6), "bold"))
-                    # Add vignette
                     duration = self.get_video_duration(file_path)
                     creation_date = self.get_creation_date(file_path)
                     info_text = f"{duration}  |  {creation_date}"
@@ -164,13 +167,14 @@ class Slideshow:
                     img = img.resize((w, h), Image.LANCZOS)
                     photo_img = ImageTk.PhotoImage(img)
                     self.shadow(x, y, w, h)
-                    #self.canvas.create_image(x, y, anchor="nw", image=photo_img)
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
                     self.canvas.tag_bind(img_id, "<Button-1>",
                         lambda e, path=file_path: self.open_with_default_image_viewer(path))
                     self.image_refs.append(photo_img)
 
         self.slider.set(self.current_image)
+
+
 
     def open_with_default_player(self, video_path):
         if sys.platform.startswith('darwin'):
