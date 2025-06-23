@@ -9,6 +9,7 @@ import subprocess
 import cv2
 import time
 import datetime
+import math
 
 VIDEO_EXTENSIONS = ('.mp4', '.webm')
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG')
@@ -22,6 +23,8 @@ class Slideshow:
         self.panel_step = self.panel_cols * self.panel_rows
         self.current_image = 0
         self.images = self.get_images()
+        self.nb_media = len(self.images)
+        self.best_grid()
         self.image_refs = []
         self.setup_ui()
         self.update_clock()
@@ -34,7 +37,12 @@ class Slideshow:
         if not all(isinstance(c, int) and 0 <= c <= 255 for c in (r, g, b)):
             raise ValueError("RGB values ​​must be whole between 0 and 255")
         return f"#{r:02x}{g:02x}{b:02x}"
-
+    
+    def best_grid(self):
+        if (self.nb_media < self.panel_cols * self.panel_rows ):
+            self.panel_cols = math.ceil(math.sqrt(self.nb_media))
+            self.panel_rows = math.ceil(self.nb_media/self.panel_cols)
+        
     def shadow(self, x, y, w, h):
         colors = [
             (30, 30, 30, 10),
@@ -112,17 +120,21 @@ class Slideshow:
         self.canvas.delete("all")
         self.image_refs.clear()
         screen_width = self.screen_width
-        screen_height = self.screen_height - 110
+        screen_height = self.screen_height
         cols, rows = self.panel_cols, self.panel_rows
-        max_img_width = screen_width // cols - 10
-        max_img_height = screen_height // rows - 50
+        e = 80       
+        max_img_width = screen_width // cols
+        max_img_height = screen_height // rows - e
         start_index = self.current_image
 
-        grid_width = cols * max_img_width + (cols - 1) * 10
-        grid_height = rows * max_img_height + (rows - 1) * 10
-
-        px = (screen_width - grid_width) // 2
+        grid_width = cols * max_img_width
+        grid_height = rows * max_img_height
+        
+        px = (screen_width - grid_width) // 2 
         py = (screen_height - grid_height) // 2
+        
+        Iw = max_img_width - e
+        Ih = max_img_height - e
 
         for i in range(rows):
             for j in range(cols):
@@ -131,18 +143,20 @@ class Slideshow:
                 img_index = (start_index + i * cols + j) % len(self.images)
                 file_path = self.images[img_index]
                 ext = os.path.splitext(file_path)[1].lower()
-                # Nouvelle position centrée
-                x = px + j * (max_img_width + 10)
-                y = py + i * (max_img_height + 10)
+
+                x = px + j * (max_img_width)
+                y = py + i * (max_img_height)
                 w, h = max_img_width, max_img_height
 
                 if ext in VIDEO_EXTENSIONS:
                     img = self.get_video_thumbnail(file_path)
                     width, height = img.size
-                    ratio = min(max_img_width / width, max_img_height / height)
+                    ratio = min(Iw / width, Ih / height)
                     w, h = int(width * ratio), int(height * ratio)
                     img = img.resize((w, h), Image.LANCZOS)
                     photo_img = ImageTk.PhotoImage(img)
+                    x = x + (max_img_width - w) // 2  
+                    y = y + (max_img_height - h) // 2  
                     self.shadow(x, y, w, h)
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
                     self.canvas.tag_bind(img_id, "<Button-1>",
@@ -166,6 +180,8 @@ class Slideshow:
                     w, h = int(width * ratio), int(height * ratio)
                     img = img.resize((w, h), Image.LANCZOS)
                     photo_img = ImageTk.PhotoImage(img)
+                    x = x + (max_img_width - w) // 2  
+                    y = y + (max_img_height - h) // 2  
                     self.shadow(x, y, w, h)
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
                     self.canvas.tag_bind(img_id, "<Button-1>",
