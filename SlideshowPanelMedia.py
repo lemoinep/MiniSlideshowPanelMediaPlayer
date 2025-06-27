@@ -71,6 +71,21 @@ class Slideshow:
         else:
             return Image.new("RGB", (320, 240), color="black")
 
+    def get_video_thumbnail(self, video_path, frame_number):
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return Image.new("RGB", (320, 240), color="black")
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number) 
+        ret, frame = cap.read()
+        cap.release()
+        
+        if ret:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(frame)
+            return img
+        else:
+            return Image.new("RGB", (320, 240), color="black")
+        
     def get_video_duration(self, video_path):
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -211,6 +226,16 @@ class Slideshow:
             subprocess.Popen(['xdg-open', image_path])
         else:
             print("Unsupported OS: cannot open image.")
+            
+    def open_with_default_audio_player(self, audio_path):
+        if sys.platform.startswith('darwin'):
+            subprocess.Popen(['open', audio_path])
+        elif os.name == 'nt':
+            os.startfile(audio_path)
+        elif os.name == 'posix':
+            subprocess.Popen(['xdg-open', audio_path])
+        else:
+            print("Unsupported OS: cannot open audio file.")
 
     def next_image(self):
         if self.images:
