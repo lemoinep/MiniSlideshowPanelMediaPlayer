@@ -1,5 +1,5 @@
 # Author(s): Dr. Patrick Lemoine
-# Objective: create a video panel, click on the video and play it.
+# Objective: create a media panel, click on the video and play it or ...
 
 import tkinter as tk
 from PIL import Image, ImageTk
@@ -10,9 +10,13 @@ import cv2
 import time
 import datetime
 import math
+from mutagen.mp3 import MP3
+from mutagen.wave import WAVE
+
 
 VIDEO_EXTENSIONS = ('.mp4', '.webm')
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG')
+SOUND_EXTENSIONS = ('.mp3','.wav')
 
 class Slideshow:
     def __init__(self, master, directory, panel_cols, panel_rows):
@@ -26,6 +30,9 @@ class Slideshow:
         self.nb_media = len(self.images)
         self.best_grid()
         self.image_refs = []
+        currentDirectory = os.getcwd()
+        PathW=os.path.dirname(sys.argv[0])
+        self.audio_placeholder_img =  Image.open(PathW+"/audio.jpg")
         self.setup_ui()
         self.update_clock()
         self.master.bind("<Escape>", self.exit_app_key)
@@ -56,7 +63,7 @@ class Slideshow:
 
     def get_images(self):
         files = [file for file in os.listdir(self.directory)
-                 if file.lower().endswith(IMAGE_EXTENSIONS + VIDEO_EXTENSIONS)]
+                 if file.lower().endswith(IMAGE_EXTENSIONS + VIDEO_EXTENSIONS + SOUND_EXTENSIONS)]
         files_sorted = sorted(files)
         return [os.path.join(self.directory, file) for file in files_sorted]
 
@@ -71,7 +78,7 @@ class Slideshow:
         else:
             return Image.new("RGB", (320, 240), color="black")
 
-    def get_video_thumbnail(self, video_path, frame_number):
+    def get_video_thumbnail_frame_number(self, video_path, frame_number):
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return Image.new("RGB", (320, 240), color="black")
@@ -98,6 +105,16 @@ class Slideshow:
             return f"{minutes:02d}:{rem_sec:02d}"
         else:
             return "??:??"
+        
+    def get_audio_length(self,file_path):
+        if file_path.lower().endswith('.mp3'):
+            audio = MP3(file_path)
+            return audio.info.length
+        elif file_path.lower().endswith('.wav'):
+            audio = WAVE(file_path)
+            return audio.info.length
+        else:
+            raise ValueError("Error not valid")
 
     def get_creation_date(self, file_path):
         create_time = os.path.getctime(file_path)
@@ -188,10 +205,37 @@ class Slideshow:
                         fill="white",
                         font=("Helvetica", 8, "bold")
                     )
+                    
+                elif ext in SOUND_EXTENSIONS:
+                    img = self.audio_placeholder_img.copy()
+                    width, height = img.size
+                    ratio = min(Iw / width, Ih / height)
+                    w, h = int(width * ratio), int(height * ratio)
+                    img = img.resize((w, h), Image.LANCZOS)
+                    photo_img = ImageTk.PhotoImage(img)
+                    x = x + (max_img_width - w) // 2  
+                    y = y + (max_img_height - h) // 2  
+                    self.shadow(x, y, w, h)
+                    img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
+                    self.canvas.tag_bind(img_id, "<Button-1>",
+                        lambda e, path=file_path: self.open_with_default_player(path))
+                    self.image_refs.append(photo_img)
+                    self.canvas.create_text(x+w//2, y+h//2,text="▶",fill="white",
+                                            font=("Helvetica", max(20, w//6), "bold"))
+                      
+                    duration = self.get_audio_length(file_path)                      
+                    creation_date = self.get_creation_date(file_path)
+                    info_text = f"{duration:.2f} s |  {creation_date}"
+                    self.canvas.create_text(
+                        x + w//2, y + h + 20,
+                        text=info_text,
+                        fill="white",
+                        font=("Helvetica", 8, "bold")
+                    )
                 else:
                     img = Image.open(file_path)
                     width, height = img.size
-                    ratio = min(max_img_width / width, max_img_height / height)
+                    ratio = min(Iw / width, Ih / height)
                     w, h = int(width * ratio), int(height * ratio)
                     img = img.resize((w, h), Image.LANCZOS)
                     photo_img = ImageTk.PhotoImage(img)
@@ -202,6 +246,15 @@ class Slideshow:
                     self.canvas.tag_bind(img_id, "<Button-1>",
                         lambda e, path=file_path: self.open_with_default_image_viewer(path))
                     self.image_refs.append(photo_img)
+                    
+                    creation_date = self.get_creation_date(file_path)
+                    info_text = f"{creation_date}"
+                    self.canvas.create_text(
+                        x + w//2, y + h + 20,
+                        text=info_text,
+                        fill="white",
+                        font=("Helvetica", 8, "bold")
+                    )
 
         self.slider.set(self.current_image)
 
