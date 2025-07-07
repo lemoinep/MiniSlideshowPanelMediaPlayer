@@ -10,6 +10,7 @@ import cv2
 import time
 import datetime
 import math
+import numpy as np
 from mutagen.mp3 import MP3
 from mutagen.wave import WAVE
 
@@ -92,6 +93,32 @@ class Slideshow:
             return img
         else:
             return Image.new("RGB", (320, 240), color="black")
+        
+        
+    def is_frame_black(self, frame, threshold=10):
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        mean_intensity = np.mean(gray)
+        return mean_intensity < threshold
+
+    def get_first_non_black_frame(self, video_path, max_frames_to_check=30):
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return Image.new("RGB", (320, 240), color="black")
+
+        frame_number = 0
+        while frame_number < max_frames_to_check:
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                break
+            if not self.is_frame_black(frame):
+                cap.release()
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                return Image.fromarray(frame_rgb)
+            frame_number += 1
+
+        cap.release()
+        return Image.new("RGB", (320, 240), color="black")
+
         
     def get_video_duration(self, video_path):
         cap = cv2.VideoCapture(video_path)
@@ -181,7 +208,8 @@ class Slideshow:
                 w, h = max_img_width, max_img_height
 
                 if ext in VIDEO_EXTENSIONS:
-                    img = self.get_video_thumbnail(file_path)
+                    #img = self.get_video_thumbnail(file_path)
+                    img = self.get_first_non_black_frame(file_path,30) 
                     width, height = img.size
                     ratio = min(Iw / width, Ih / height)
                     w, h = int(width * ratio), int(height * ratio)
