@@ -95,7 +95,7 @@ class Slideshow:
             return Image.new("RGB", (320, 240), color="black")
         
         
-    def is_frame_black(self, frame, threshold=10):
+    def is_frame_black(self, frame, threshold=20):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         mean_intensity = np.mean(gray)
         return mean_intensity < threshold
@@ -118,8 +118,91 @@ class Slideshow:
 
         cap.release()
         return Image.new("RGB", (320, 240), color="black")
-
+    
+    def get_4_non_black_frames_composed(self, video_path, max_frames_to_check=200):
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return Image.new("RGB", (640, 480), color="black")
         
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        step = max(total_frames // max_frames_to_check, 1)
+        
+        frames_collected = []
+        frame_idx = 0
+        
+        while len(frames_collected) < 4 and frame_idx < total_frames:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if not self.is_frame_black(frame):
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img = Image.fromarray(frame_rgb)
+                frames_collected.append(img)
+            frame_idx += step
+        
+        cap.release()
+        
+        while len(frames_collected) < 4:
+            if frames_collected:
+                frames_collected.append(frames_collected[-1].copy())
+            else:
+                black_img = Image.new("RGB", (320, 240), color="black")
+                frames_collected.extend([black_img.copy() for _ in range(4)])
+
+        size = (320, 240)
+        frames_resized = [img.resize(size) for img in frames_collected]
+
+        composed_img = Image.new("RGB", (size[0]*2, size[1]*2))
+        positions = [(0,0), (size[0],0), (0,size[1]), (size[0],size[1])]
+        for pos, img in zip(positions, frames_resized):
+            composed_img.paste(img, pos)
+        
+        return composed_img
+
+    def get_4_non_black_frames_composed_OpenCV(self, video_path, max_frames_to_check=200):
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return Image.new("RGB", (640, 480), color="black")
+    
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        step = max(total_frames // max_frames_to_check, 1)
+        
+        frames_collected = []
+        frame_idx = 0
+        read_frames = 0
+    
+        while len(frames_collected) < 4 and read_frames < max_frames_to_check:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if frame_idx % step == 0:
+                if not self.is_frame_black(frame):
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frames_collected.append(Image.fromarray(frame_rgb))
+            frame_idx += 1
+            read_frames += 1
+    
+        cap.release()
+    
+        if len(frames_collected) == 0:
+            black_img = Image.new("RGB", (320, 240), color="black")
+            frames_collected = [black_img.copy() for _ in range(4)]
+        else:
+            while len(frames_collected) < 4:
+                frames_collected.append(frames_collected[-1].copy())
+    
+        size = (320, 240)
+        frames_resized = [img.resize(size) for img in frames_collected]
+    
+        composed_img = Image.new("RGB", (size[0]*2, size[1]*2))
+        positions = [(0,0), (size[0],0), (0,size[1]), (size[0],size[1])]
+        for pos, img in zip(positions, frames_resized):
+            composed_img.paste(img, pos)
+    
+        return composed_img
+        
+    
     def get_video_duration(self, video_path):
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -209,7 +292,10 @@ class Slideshow:
 
                 if ext in VIDEO_EXTENSIONS:
                     #img = self.get_video_thumbnail(file_path)
-                    img = self.get_first_non_black_frame(file_path,30) 
+                    img = self.get_first_non_black_frame(file_path,120) 
+                    #img = self.get_4_non_black_frames_composed(file_path,200)
+                    #img = self.get_4_non_black_frames_composed_OpenCV(file_path,200)
+                    
                     width, height = img.size
                     ratio = min(Iw / width, Ih / height)
                     w, h = int(width * ratio), int(height * ratio)
