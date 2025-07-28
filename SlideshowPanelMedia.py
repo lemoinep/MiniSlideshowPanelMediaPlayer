@@ -13,6 +13,7 @@ import math
 import numpy as np
 from mutagen.mp3 import MP3
 from mutagen.wave import WAVE
+from concurrent.futures import ProcessPoolExecutor
 
 
 VIDEO_EXTENSIONS = ('.mp4', '.webm')
@@ -20,12 +21,13 @@ IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG')
 SOUND_EXTENSIONS = ('.mp3','.wav')
 
 class Slideshow:
-    def __init__(self, master, directory, panel_cols, panel_rows, mode):
+    def __init__(self, master, directory, panel_cols, panel_rows, mode, workers):
         self.master = master
         self.directory = directory
         self.panel_cols = panel_cols
         self.panel_rows = panel_rows
         self.mode = mode
+        self.workers = workers
         self.panel_step = self.panel_cols * self.panel_rows
         self.current_image = 0
         self.images = self.get_images()
@@ -173,6 +175,46 @@ class Slideshow:
         
         return composed_img
 
+
+    def get_non_black_frames_composed_parallel(self, video_path, num_frames=4, max_workers=4):
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return Image.new("RGB", (320, 240), color="black")
+        
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+        
+        step = max(total_frames / (num_frames + 1), 1)
+        frame_indices = [int(step * (i+1)) for i in range(num_frames)]
+        
+        frames_collected = []
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(lambda idx: self.get_video_thumbnail_frame_number(video_path, idx), frame_indices))
+        
+
+        results.sort(key=lambda x: x[0])
+        for idx, img in results:
+            if img is not None and not self.is_frame_black(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)):
+                frames_collected.append(img)
+        
+        if frames_collected:
+            while len(frames_collected) < num_frames:
+                frames_collected.append(frames_collected[-1].copy())
+        else:
+            black_img = Image.new("RGB", (320, 240), color="black")
+            frames_collected = [black_img.copy() for _ in range(num_frames)]
+    
+        size = frames_collected[0].size
+        frames_resized = [img.resize(size) for img in frames_collected]
+    
+        grid_size = int(math.sqrt(num_frames))
+        composed_img = Image.new("RGB", (size[0]*grid_size, size[1]*grid_size))
+        positions = [(x*size[0], y*size[1]) for y in range(grid_size) for x in range(grid_size)]
+    
+        for pos, img in zip(positions, frames_resized):
+            composed_img.paste(img, pos)
+        
+        return composed_img
 
 
     def get_4_non_black_frames_composed_vers1(self, video_path, max_frames_to_check=200):
@@ -325,6 +367,10 @@ class Slideshow:
                         
                     if (self.mode==3) :
                         img = self.get_non_black_frames_composed_vers2(file_path, 9)
+                        
+                    if (self.mode==5) :
+                        img = self.get_non_black_frames_composed_parallel(file_path, 9, self.workers)   
+
                     
                     width, height = img.size
                     ratio = min(Iw / width, Ih / height)
@@ -480,8 +526,9 @@ if __name__ == "__main__":
     parser.add_argument('--Cols', type=int, default=7, help='Cols.')
     parser.add_argument('--Rows', type=int, default=5, help='Rows.')
     parser.add_argument('--Mode', type=int, default=0, help='Mode.')
+    parser.add_argument('--Workers', type=int, default=4, help='Number of parallel threads')
     args = parser.parse_args()
     root = tk.Tk()
-    slideshow = Slideshow(root, args.Path, args.Cols, args.Rows, args.Mode)
+    slideshow = Slideshow(root, args.Path, args.Cols, args.Rows, args.Mode, args.Workers)
     root.mainloop()
 
