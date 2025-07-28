@@ -20,11 +20,12 @@ IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG')
 SOUND_EXTENSIONS = ('.mp3','.wav')
 
 class Slideshow:
-    def __init__(self, master, directory, panel_cols, panel_rows):
+    def __init__(self, master, directory, panel_cols, panel_rows, mode):
         self.master = master
         self.directory = directory
         self.panel_cols = panel_cols
         self.panel_rows = panel_rows
+        self.mode = mode
         self.panel_step = self.panel_cols * self.panel_rows
         self.current_image = 0
         self.images = self.get_images()
@@ -110,7 +111,7 @@ class Slideshow:
             ret, frame = cap.read()
             if not ret or frame is None:
                 break
-            if not self.is_frame_black(frame):
+            if not self.is_frame_black(frame,50):
                 cap.release()
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 return Image.fromarray(frame_rgb)
@@ -119,19 +120,27 @@ class Slideshow:
         cap.release()
         return Image.new("RGB", (320, 240), color="black")
     
-    def get_4_non_black_frames_composed(self, video_path, max_frames_to_check=200):
+    
+    def get_non_black_frames_composed_vers2(self, video_path, num_frames=4):
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            return Image.new("RGB", (640, 480), color="black")
+            return Image.new("RGB", (320, 240), color="black")
         
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        step = max(total_frames // max_frames_to_check, 1)
+        step = max(total_frames / (num_frames + 1), 1)
         
         frames_collected = []
         frame_idx = 0
-        
-        while len(frames_collected) < 4 and frame_idx < total_frames:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+    
+        ret, frame = cap.read()
+        if not ret:
+            cap.release()
+            return Image.new("RGB", (320, 240), color="black")
+        img = Image.fromarray(frame)
+        w0, h0 = img.size
+    
+        while len(frames_collected) < num_frames and frame_idx < total_frames:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_idx))
             ret, frame = cap.read()
             if not ret:
                 break
@@ -142,28 +151,35 @@ class Slideshow:
             frame_idx += step
         
         cap.release()
-        
-        while len(frames_collected) < 4:
+    
+        while len(frames_collected) < num_frames:
             if frames_collected:
                 frames_collected.append(frames_collected[-1].copy())
             else:
                 black_img = Image.new("RGB", (320, 240), color="black")
-                frames_collected.extend([black_img.copy() for _ in range(4)])
-
-        size = (320, 240)
+                frames_collected.extend([black_img.copy() for _ in range(num_frames)])
+    
+        size = (w0, h0)
         frames_resized = [img.resize(size) for img in frames_collected]
-
-        composed_img = Image.new("RGB", (size[0]*2, size[1]*2))
-        positions = [(0,0), (size[0],0), (0,size[1]), (size[0],size[1])]
+    
+        import math
+        grid_size = int(math.sqrt(num_frames))
+        composed_img = Image.new("RGB", (size[0]*grid_size, size[1]*grid_size))
+    
+        positions = [(x*size[0], y*size[1]) for y in range(grid_size) for x in range(grid_size)]
+    
         for pos, img in zip(positions, frames_resized):
             composed_img.paste(img, pos)
         
         return composed_img
 
-    def get_4_non_black_frames_composed_OpenCV(self, video_path, max_frames_to_check=200):
+
+
+    def get_4_non_black_frames_composed_vers1(self, video_path, max_frames_to_check=200):
+        # version for webm 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            return Image.new("RGB", (640, 480), color="black")
+            return Image.new("RGB", (320, 240), color="black")
     
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         step = max(total_frames // max_frames_to_check, 1)
@@ -171,6 +187,12 @@ class Slideshow:
         frames_collected = []
         frame_idx = 0
         read_frames = 0
+        w0 = 320
+        h0 = 240
+        
+        ret, frame = cap.read()
+        img = Image.fromarray(frame)
+        w0, h0 = img.size
     
         while len(frames_collected) < 4 and read_frames < max_frames_to_check:
             ret, frame = cap.read()
@@ -192,9 +214,8 @@ class Slideshow:
             while len(frames_collected) < 4:
                 frames_collected.append(frames_collected[-1].copy())
     
-        size = (320, 240)
-        frames_resized = [img.resize(size) for img in frames_collected]
-    
+        size = (w0, h0)        
+        frames_resized = [img.resize(size) for img in frames_collected]    
         composed_img = Image.new("RGB", (size[0]*2, size[1]*2))
         positions = [(0,0), (size[0],0), (0,size[1]), (size[0],size[1])]
         for pos, img in zip(positions, frames_resized):
@@ -292,9 +313,18 @@ class Slideshow:
 
                 if ext in VIDEO_EXTENSIONS:
                     #img = self.get_video_thumbnail(file_path)
-                    img = self.get_first_non_black_frame(file_path,120) 
-                    #img = self.get_4_non_black_frames_composed(file_path,200)
-                    #img = self.get_4_non_black_frames_composed_OpenCV(file_path,200)
+                    
+                    if (self.mode==0) :
+                        img = self.get_first_non_black_frame(file_path,120) 
+                    
+                    if (self.mode==1) :
+                        img = self.get_4_non_black_frames_composed_vers1(file_path,1000)
+                        
+                    if (self.mode==2) :
+                        img = self.get_non_black_frames_composed_vers2(file_path, 4)
+                        
+                    if (self.mode==3) :
+                        img = self.get_non_black_frames_composed_vers2(file_path, 9)
                     
                     width, height = img.size
                     ratio = min(Iw / width, Ih / height)
@@ -449,8 +479,9 @@ if __name__ == "__main__":
     parser.add_argument('--Path', type=str, default='.', help='Path.')
     parser.add_argument('--Cols', type=int, default=7, help='Cols.')
     parser.add_argument('--Rows', type=int, default=5, help='Rows.')
+    parser.add_argument('--Mode', type=int, default=0, help='Mode.')
     args = parser.parse_args()
     root = tk.Tk()
-    slideshow = Slideshow(root, args.Path, args.Cols, args.Rows)
+    slideshow = Slideshow(root, args.Path, args.Cols, args.Rows, args.Mode)
     root.mainloop()
 
