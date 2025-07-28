@@ -20,6 +20,20 @@ VIDEO_EXTENSIONS = ('.mp4', '.webm')
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG')
 SOUND_EXTENSIONS = ('.mp3','.wav')
 
+
+def extract_frame_parallel(args):
+    video_path, frame_idx = args
+    cap = cv2.VideoCapture(video_path)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+    ret, frame = cap.read()
+    cap.release()
+    if not ret:
+        return (frame_idx, None)
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    img = Image.fromarray(frame_rgb)
+    return (frame_idx, img)
+
+
 class Slideshow:
     def __init__(self, master, directory, panel_cols, panel_rows, mode, workers):
         self.master = master
@@ -176,27 +190,31 @@ class Slideshow:
         return composed_img
 
 
-    def get_non_black_frames_composed_parallel(self, video_path, num_frames=4, max_workers=4):
+  
+    def get_non_black_frames_composed_parallel(self, video_path, num_frames=4, max_workers=4, is_frame_black_func=None):
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return Image.new("RGB", (320, 240), color="black")
-        
+    
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         cap.release()
-        
+    
         step = max(total_frames / (num_frames + 1), 1)
-        frame_indices = [int(step * (i+1)) for i in range(num_frames)]
-        
-        frames_collected = []
+        frame_indices = [int(step * (i + 1)) for i in range(num_frames)]
+    
+        params = [(video_path, idx) for idx in frame_indices]
+    
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            results = list(executor.map(lambda idx: self.get_video_thumbnail_frame_number(video_path, idx), frame_indices))
-        
-
-        results.sort(key=lambda x: x[0])
+            results = list(executor.map(extract_frame_parallel, params))
+    
+        results = sorted(results, key=lambda x: x[0])
+    
+        frames_collected = []
         for idx, img in results:
-            if img is not None and not self.is_frame_black(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)):
-                frames_collected.append(img)
-        
+            if img is not None:
+                if is_frame_black_func is None or not is_frame_black_func(np.array(img)[:, :, ::-1]):
+                    frames_collected.append(img)
+    
         if frames_collected:
             while len(frames_collected) < num_frames:
                 frames_collected.append(frames_collected[-1].copy())
@@ -213,8 +231,9 @@ class Slideshow:
     
         for pos, img in zip(positions, frames_resized):
             composed_img.paste(img, pos)
-        
+    
         return composed_img
+
 
 
     def get_4_non_black_frames_composed_vers1(self, video_path, max_frames_to_check=200):
