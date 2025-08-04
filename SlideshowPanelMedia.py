@@ -14,11 +14,13 @@ import numpy as np
 from mutagen.mp3 import MP3
 from mutagen.wave import WAVE
 from concurrent.futures import ProcessPoolExecutor
+import fitz
 
 
 VIDEO_EXTENSIONS = ('.mp4', '.webm')
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG')
 SOUND_EXTENSIONS = ('.mp3','.wav')
+PDF_EXTENSIONS   = ('.pdf','.PDF') 
 
 
 def extract_frame_parallel(args):
@@ -81,7 +83,7 @@ class Slideshow:
 
     def get_images(self):
         files = [file for file in os.listdir(self.directory)
-                 if file.lower().endswith(IMAGE_EXTENSIONS + VIDEO_EXTENSIONS + SOUND_EXTENSIONS)]
+                 if file.lower().endswith(IMAGE_EXTENSIONS + VIDEO_EXTENSIONS + SOUND_EXTENSIONS + PDF_EXTENSIONS)]
         files_sorted = sorted(files)
         return [os.path.join(self.directory, file) for file in files_sorted]
 
@@ -307,11 +309,23 @@ class Slideshow:
             return audio.info.length
         else:
             raise ValueError("Error not valid")
+            
+    
+    def get_first_page_from_pdf(self,pdf_path, dpi=200):
+        pdf_document = fitz.open(pdf_path)
+        page = pdf_document.load_page(0)
+        zoom = dpi / 72  
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        pdf_document.close()  
+        return img
+
 
     def get_creation_date(self, file_path):
         create_time = os.path.getctime(file_path)
         create_date = datetime.datetime.fromtimestamp(create_time)
-        # Format : JJ/MM/AAAA HH:MM
+        # Format : DD/MM/AAAA HH:MM
         return create_date.strftime("%d/%m/%Y %H:%M")
 
     def setup_ui(self):
@@ -339,6 +353,7 @@ class Slideshow:
         self.clock_label.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
 
         self.show_image()
+
 
     def show_image(self):
         self.canvas.delete("all")
@@ -441,6 +456,34 @@ class Slideshow:
                         fill="white",
                         font=("Helvetica", 8, "bold")
                     )
+                    
+                elif ext in PDF_EXTENSIONS:
+                    img = self.get_first_page_from_pdf(file_path)
+                    width, height = img.size
+                    ratio = min(Iw / width, Ih / height)
+                    w, h = int(width * ratio), int(height * ratio)
+                    img = img.resize((w, h), Image.LANCZOS)
+                    photo_img = ImageTk.PhotoImage(img)
+                    x = x + (max_img_width - w) // 2  
+                    y = y + (max_img_height - h) // 2  
+                    self.shadow(x, y, w, h)
+                    img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
+                    self.canvas.tag_bind(img_id, "<Button-1>",
+                        lambda e, path=file_path: self.open_with_default_player(path))
+                    self.image_refs.append(photo_img)
+                    self.canvas.create_text(x+w//2, y+h//2,text="▶",fill="white",
+                                            font=("Helvetica", max(20, w//6), "bold"))
+                      
+                    #duration = self.get_audio_length(file_path)                      
+                    creation_date = self.get_creation_date(file_path)
+                    info_text = f"{creation_date}"
+                    self.canvas.create_text(
+                        x + w//2, y + h + 20,
+                        text=info_text,
+                        fill="white",
+                        font=("Helvetica", 8, "bold")
+                    )
+    
                 else:
                     img = Image.open(file_path)
                     width, height = img.size
@@ -466,7 +509,6 @@ class Slideshow:
                     )
 
         self.slider.set(self.current_image)
-
 
 
     def open_with_default_player(self, video_path):
