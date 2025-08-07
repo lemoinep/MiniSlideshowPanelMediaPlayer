@@ -320,6 +320,13 @@ class Slideshow:
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         pdf_document.close()  
         return img
+    
+    
+    def get_pdf_page_count(self, pdf_path):
+        pdf_document = fitz.open(pdf_path)
+        page_count = pdf_document.page_count  
+        pdf_document.close()
+        return page_count
 
 
     def get_creation_date(self, file_path):
@@ -473,10 +480,10 @@ class Slideshow:
                     self.image_refs.append(photo_img)
                     self.canvas.create_text(x+w//2, y+h//2,text="▶",fill="white",
                                             font=("Helvetica", max(20, w//6), "bold"))
-                      
-                    #duration = self.get_audio_length(file_path)                      
+                                          
                     creation_date = self.get_creation_date(file_path)
-                    info_text = f"{creation_date}"
+                    nb_page = self.get_pdf_page_count(file_path)
+                    info_text = f"{nb_page} Pg | {creation_date}"
                     self.canvas.create_text(
                         x + w//2, y + h + 20,
                         text=info_text,
@@ -497,8 +504,7 @@ class Slideshow:
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
                     self.canvas.tag_bind(img_id, "<Button-1>",
                         lambda e, path=file_path: self.open_with_default_image_viewer(path))
-                    self.image_refs.append(photo_img)
-                    
+                    self.image_refs.append(photo_img)                  
                     creation_date = self.get_creation_date(file_path)
                     info_text = f"{creation_date}"
                     self.canvas.create_text(
