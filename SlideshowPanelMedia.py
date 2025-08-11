@@ -1,5 +1,6 @@
 # Author(s): Dr. Patrick Lemoine
 # Objective: create a media panel, click on the video and play it or ...
+# add cache option for movies
 
 import tkinter as tk
 from PIL import Image, ImageTk
@@ -15,12 +16,44 @@ from mutagen.mp3 import MP3
 from mutagen.wave import WAVE
 from concurrent.futures import ProcessPoolExecutor
 import fitz
-
+import json
 
 VIDEO_EXTENSIONS = ('.mp4', '.webm')
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG')
-SOUND_EXTENSIONS = ('.mp3','.wav')
-PDF_EXTENSIONS   = ('.pdf','.PDF') 
+SOUND_EXTENSIONS = ('.mp3', '.wav')
+PDF_EXTENSIONS = ('.pdf', '.PDF')
+
+
+def get_cache_directory(video_path):
+    video_dir = os.path.dirname(video_path)
+    video_name = os.path.splitext(os.path.basename(video_path))[0]
+    cache_name = "cache"
+    cache_dir = os.path.join(video_dir, cache_name)
+    return cache_dir
+
+def save_cache_config(cache_dir, cols, rows, mode):
+    if not os.path.isdir(cache_dir):
+        os.makedirs(cache_dir)
+    config_path = os.path.join(cache_dir, 'config.json')
+    config_data = {'cols': cols, 'rows': rows, 'mode': mode}
+    with open(config_path, 'w') as f:
+        json.dump(config_data, f)
+
+def load_cache_config(cache_dir):
+    config_path = os.path.join(cache_dir, 'config.json')
+    if not os.path.isfile(config_path):
+        return None
+    try:
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def has_cache_config_changed(cache_dir, cols, rows, mode):
+    config = load_cache_config(cache_dir)
+    if config is None:
+        return True
+    return (config.get('cols') != cols or config.get('rows') != rows or config.get('mode') != mode)
 
 
 def extract_frame_parallel(args):
@@ -35,24 +68,26 @@ def extract_frame_parallel(args):
     img = Image.fromarray(frame_rgb)
     return (frame_idx, img)
 
-
 class Slideshow:
-    def __init__(self, master, directory, panel_cols, panel_rows, mode, workers):
+    def __init__(self, master, directory, panel_cols, panel_rows, mode, workers, qcache=False):
         self.master = master
         self.directory = directory
         self.panel_cols = panel_cols
         self.panel_rows = panel_rows
         self.mode = mode
         self.workers = workers
+        self.qcache = qcache
         self.panel_step = self.panel_cols * self.panel_rows
         self.current_image = 0
         self.images = self.get_images()
         self.nb_media = len(self.images)
         self.best_grid()
         self.image_refs = []
-        currentDirectory = os.getcwd()
-        PathW=os.path.dirname(sys.argv[0])
-        self.audio_placeholder_img =  Image.open(PathW+"/audio.jpg")
+        PathW = os.path.dirname(sys.argv[0])
+        self.audio_placeholder_img = Image.open(PathW + "/audio.jpg")
+        self.cache_dir = None
+        if self.qcache:
+            self.init_video_cache()
         self.setup_ui()
         self.update_clock()
         self.master.bind("<Escape>", self.exit_app_key)
@@ -60,233 +95,184 @@ class Slideshow:
         self.master.bind("<Left>", lambda e: self.prev_image())
         self.master.bind("<Right>", lambda e: self.next_image())
 
+    def init_video_cache(self):
+        # Find first video file to create the cache directory
+        for file_path in self.images:
+            if file_path.lower().endswith(VIDEO_EXTENSIONS):
+                self.cache_dir = get_cache_directory(file_path)
+                break
+        if self.cache_dir:
+            if not os.path.isdir(self.cache_dir):
+                os.makedirs(self.cache_dir)
+            if has_cache_config_changed(self.cache_dir, self.panel_cols, self.panel_rows, self.mode):
+                # Config changed => purge old cache
+                for f in os.listdir(self.cache_dir):
+                    if f.endswith(".jpg") or f.endswith(".png"):
+                        try:
+                            os.remove(os.path.join(self.cache_dir, f))
+                        except:
+                            pass
+                save_cache_config(self.cache_dir, self.panel_cols, self.panel_rows, self.mode)
+
     def rgb_to_hex(self, r, g, b):
-        if not all(isinstance(c, int) and 0 <= c <= 255 for c in (r, g, b)):
-            raise ValueError("RGB values ​​must be whole between 0 and 255")
         return f"#{r:02x}{g:02x}{b:02x}"
-    
+
     def best_grid(self):
-        if (self.nb_media < self.panel_cols * self.panel_rows ):
+        if self.nb_media < self.panel_cols * self.panel_rows:
             self.panel_cols = math.ceil(math.sqrt(self.nb_media))
-            self.panel_rows = math.ceil(self.nb_media/self.panel_cols)
-        
+            self.panel_rows = math.ceil(self.nb_media / self.panel_cols)
+
     def shadow(self, x, y, w, h):
-        colors = [
-            (30, 30, 30, 10),
-            (20, 20, 20, 8),
-            (10, 10, 10, 5)
-        ]
+        colors = [(30, 30, 30, 10), (20, 20, 20, 8), (10, 10, 10, 5)]
         for r, g, b, dp in colors:
-            hex_color = self.rgb_to_hex(r, g, b)
             self.canvas.create_rectangle(x+dp, y+dp, x+w+dp, y+h+dp,
-                                       fill=hex_color, outline=hex_color)
+                                        fill=self.rgb_to_hex(r, g, b), outline=self.rgb_to_hex(r, g, b))
 
     def get_images(self):
         files = [file for file in os.listdir(self.directory)
                  if file.lower().endswith(IMAGE_EXTENSIONS + VIDEO_EXTENSIONS + SOUND_EXTENSIONS + PDF_EXTENSIONS)]
-        files_sorted = sorted(files)
-        return [os.path.join(self.directory, file) for file in files_sorted]
+        return [os.path.join(self.directory, f) for f in sorted(files)]
 
-    def get_video_thumbnail(self, video_path):
-        cap = cv2.VideoCapture(video_path)
-        ret, frame = cap.read()
-        cap.release()
-        if ret:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(frame)
-            return img
-        else:
-            return Image.new("RGB", (320, 240), color="black")
+    def get_cached_or_generate_video_thumb(self, video_path):
+        if not self.qcache or not self.cache_dir:
+            return self.make_video_thumb(video_path)
+        thumb_file = os.path.join(self.cache_dir, os.path.basename(video_path) + ".jpg")
+        if os.path.isfile(thumb_file):
+            try:
+                return Image.open(thumb_file)
+            except:
+                pass
+        img = self.make_video_thumb(video_path)
+        try:
+            img.save(thumb_file, format="JPEG")
+        except:
+            pass
+        return img
 
-    def get_video_thumbnail_frame_number(self, video_path, frame_number):
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            return Image.new("RGB", (320, 240), color="black")
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number) 
-        ret, frame = cap.read()
-        cap.release()
-        
-        if ret:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(frame)
-            return img
+    def make_video_thumb(self, video_path):
+        if self.mode == 0:
+            return self.get_first_non_black_frame(video_path, 120)
+        elif self.mode == 1:
+            return self.get_4_non_black_frames_composed_vers1(video_path, 1000)
+        elif self.mode == 2:
+            return self.get_non_black_frames_composed_vers2(video_path, 4)
+        elif self.mode == 3:
+            return self.get_non_black_frames_composed_vers2(video_path, 9)
+        elif self.mode == 5:
+            return self.get_non_black_frames_composed_parallel(video_path, 9, self.workers)
         else:
-            return Image.new("RGB", (320, 240), color="black")
-        
-        
+            return self.get_first_non_black_frame(video_path, 120)
+
     def is_frame_black(self, frame, threshold=20):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        mean_intensity = np.mean(gray)
-        return mean_intensity < threshold
+        return np.mean(gray) < threshold
 
     def get_first_non_black_frame(self, video_path, max_frames_to_check=30):
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return Image.new("RGB", (320, 240), color="black")
-
         frame_number = 0
         while frame_number < max_frames_to_check:
             ret, frame = cap.read()
             if not ret or frame is None:
                 break
-            if not self.is_frame_black(frame,50):
+            if not self.is_frame_black(frame, 50):
                 cap.release()
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                return Image.fromarray(frame_rgb)
+                return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             frame_number += 1
-
         cap.release()
         return Image.new("RGB", (320, 240), color="black")
-    
-    
+
     def get_non_black_frames_composed_vers2(self, video_path, num_frames=4):
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return Image.new("RGB", (320, 240), color="black")
-        
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         step = max(total_frames / (num_frames + 1), 1)
-        
         frames_collected = []
-        frame_idx = 0
-    
         ret, frame = cap.read()
         if not ret:
             cap.release()
             return Image.new("RGB", (320, 240), color="black")
         img = Image.fromarray(frame)
         w0, h0 = img.size
-    
+        frame_idx = 0
         while len(frames_collected) < num_frames and frame_idx < total_frames:
             cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_idx))
             ret, frame = cap.read()
             if not ret:
                 break
             if not self.is_frame_black(frame):
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                img = Image.fromarray(frame_rgb)
-                frames_collected.append(img)
+                frames_collected.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
             frame_idx += step
-        
         cap.release()
-    
         while len(frames_collected) < num_frames:
-            if frames_collected:
-                frames_collected.append(frames_collected[-1].copy())
-            else:
-                black_img = Image.new("RGB", (320, 240), color="black")
-                frames_collected.extend([black_img.copy() for _ in range(num_frames)])
-    
+            frames_collected.append(frames_collected[-1].copy() if frames_collected else Image.new("RGB", (320, 240), "black"))
         size = (w0, h0)
         frames_resized = [img.resize(size) for img in frames_collected]
-    
-        import math
         grid_size = int(math.sqrt(num_frames))
         composed_img = Image.new("RGB", (size[0]*grid_size, size[1]*grid_size))
-    
         positions = [(x*size[0], y*size[1]) for y in range(grid_size) for x in range(grid_size)]
-    
         for pos, img in zip(positions, frames_resized):
             composed_img.paste(img, pos)
-        
         return composed_img
 
-
-  
-    def get_non_black_frames_composed_parallel(self, video_path, num_frames=4, max_workers=4, is_frame_black_func=None):
+    def get_non_black_frames_composed_parallel(self, video_path, num_frames=4, max_workers=4):
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return Image.new("RGB", (320, 240), color="black")
-    
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         cap.release()
-    
         step = max(total_frames / (num_frames + 1), 1)
         frame_indices = [int(step * (i + 1)) for i in range(num_frames)]
-    
         params = [(video_path, idx) for idx in frame_indices]
-    
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            results = list(executor.map(extract_frame_parallel, params))
-    
-        results = sorted(results, key=lambda x: x[0])
-    
-        frames_collected = []
-        for idx, img in results:
-            if img is not None:
-                if is_frame_black_func is None or not is_frame_black_func(np.array(img)[:, :, ::-1]):
-                    frames_collected.append(img)
-    
-        if frames_collected:
-            while len(frames_collected) < num_frames:
-                frames_collected.append(frames_collected[-1].copy())
-        else:
-            black_img = Image.new("RGB", (320, 240), color="black")
-            frames_collected = [black_img.copy() for _ in range(num_frames)]
-    
+            results = sorted(executor.map(extract_frame_parallel, params), key=lambda x: x[0])
+        frames_collected = [img for idx, img in results if img is not None]
+        if not frames_collected:
+            frames_collected = [Image.new("RGB", (320, 240), "black") for _ in range(num_frames)]
+        while len(frames_collected) < num_frames:
+            frames_collected.append(frames_collected[-1].copy())
         size = frames_collected[0].size
         frames_resized = [img.resize(size) for img in frames_collected]
-    
         grid_size = int(math.sqrt(num_frames))
         composed_img = Image.new("RGB", (size[0]*grid_size, size[1]*grid_size))
         positions = [(x*size[0], y*size[1]) for y in range(grid_size) for x in range(grid_size)]
-    
         for pos, img in zip(positions, frames_resized):
             composed_img.paste(img, pos)
-    
         return composed_img
 
-
-
     def get_4_non_black_frames_composed_vers1(self, video_path, max_frames_to_check=200):
-        # version for webm 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            return Image.new("RGB", (320, 240), color="black")
-    
+            return Image.new("RGB", (320, 240), "black")
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         step = max(total_frames // max_frames_to_check, 1)
-        
         frames_collected = []
         frame_idx = 0
-        read_frames = 0
-        w0 = 320
-        h0 = 240
-        
         ret, frame = cap.read()
         img = Image.fromarray(frame)
         w0, h0 = img.size
-    
+        read_frames = 0
         while len(frames_collected) < 4 and read_frames < max_frames_to_check:
             ret, frame = cap.read()
             if not ret:
                 break
-            if frame_idx % step == 0:
-                if not self.is_frame_black(frame):
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frames_collected.append(Image.fromarray(frame_rgb))
+            if frame_idx % step == 0 and not self.is_frame_black(frame):
+                frames_collected.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
             frame_idx += 1
             read_frames += 1
-    
         cap.release()
-    
-        if len(frames_collected) == 0:
-            black_img = Image.new("RGB", (320, 240), color="black")
-            frames_collected = [black_img.copy() for _ in range(4)]
-        else:
-            while len(frames_collected) < 4:
-                frames_collected.append(frames_collected[-1].copy())
-    
-        size = (w0, h0)        
-        frames_resized = [img.resize(size) for img in frames_collected]    
+        while len(frames_collected) < 4:
+            frames_collected.append(frames_collected[-1].copy() if frames_collected else Image.new("RGB", (320, 240), "black"))
+        size = (w0, h0)
+        frames_resized = [img.resize(size) for img in frames_collected]
         composed_img = Image.new("RGB", (size[0]*2, size[1]*2))
         positions = [(0,0), (size[0],0), (0,size[1]), (size[0],size[1])]
         for pos, img in zip(positions, frames_resized):
             composed_img.paste(img, pos)
-    
         return composed_img
-        
-    
+
     def get_video_duration(self, video_path):
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -294,46 +280,33 @@ class Slideshow:
         cap.release()
         if fps > 0:
             seconds = frame_count / fps
-            minutes = int(seconds // 60)
-            rem_sec = int(seconds % 60)
-            return f"{minutes:02d}:{rem_sec:02d}"
-        else:
-            return "??:??"
-        
-    def get_audio_length(self,file_path):
+            return f"{int(seconds//60):02d}:{int(seconds%60):02d}"
+        return "??:??"
+
+    def get_audio_length(self, file_path):
         if file_path.lower().endswith('.mp3'):
-            audio = MP3(file_path)
-            return audio.info.length
+            return MP3(file_path).info.length
         elif file_path.lower().endswith('.wav'):
-            audio = WAVE(file_path)
-            return audio.info.length
+            return WAVE(file_path).info.length
         else:
-            raise ValueError("Error not valid")
-            
-    
-    def get_first_page_from_pdf(self,pdf_path, dpi=200):
+            return 0
+
+    def get_first_page_from_pdf(self, pdf_path, dpi=200):
         pdf_document = fitz.open(pdf_path)
         page = pdf_document.load_page(0)
-        zoom = dpi / 72  
-        mat = fitz.Matrix(zoom, zoom)
-        pix = page.get_pixmap(matrix=mat)
+        pix = page.get_pixmap(matrix=fitz.Matrix(dpi/72, dpi/72))
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        pdf_document.close()  
+        pdf_document.close()
         return img
-    
-    
+
     def get_pdf_page_count(self, pdf_path):
         pdf_document = fitz.open(pdf_path)
-        page_count = pdf_document.page_count  
+        page_count = pdf_document.page_count
         pdf_document.close()
         return page_count
 
-
     def get_creation_date(self, file_path):
-        create_time = os.path.getctime(file_path)
-        create_date = datetime.datetime.fromtimestamp(create_time)
-        # Format : DD/MM/AAAA HH:MM
-        return create_date.strftime("%d/%m/%Y %H:%M")
+        return datetime.datetime.fromtimestamp(os.path.getctime(file_path)).strftime("%d/%m/%Y %H:%M")
 
     def setup_ui(self):
         self.master.config(bg="#333333")
@@ -343,45 +316,31 @@ class Slideshow:
         self.canvas = tk.Canvas(self.master, width=self.screen_width, height=self.screen_height-85,
                                 bg="#333333", highlightthickness=0)
         self.canvas.pack()
-
         slider_frame = tk.Frame(self.master, bg="#333333")
         slider_frame.pack(fill="x", side="bottom")
-        self.slider = tk.Scale(slider_frame, from_=0, to=max(len(self.images)-1, 0),
-                               orient="horizontal", command=self.slider_changed,
-                               length=600, bg="#333333", fg="white",
-                               troughcolor="#555555", highlightthickness=0)
+        self.slider = tk.Scale(slider_frame, from_=0, to=max(len(self.images)-1, 0), orient="horizontal",
+                               command=self.slider_changed, length=600, bg="#333333",
+                               fg="white", troughcolor="#555555", highlightthickness=0)
         self.slider.pack(padx=5, pady=5)
-
         self.master.bind_all("<MouseWheel>", self.on_mouse_wheel)
         self.master.bind_all("<Button-4>", self.on_mouse_wheel_up)
         self.master.bind_all("<Button-5>", self.on_mouse_wheel_down)
-
         self.clock_label = tk.Label(self.master, bg="#333333", fg="white", font=("Helvetica", 10))
         self.clock_label.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
-
         self.show_image()
-
 
     def show_image(self):
         self.canvas.delete("all")
         self.image_refs.clear()
-        screen_width = self.screen_width
-        screen_height = self.screen_height
         cols, rows = self.panel_cols, self.panel_rows
-        e = 80       
-        max_img_width = screen_width // cols
-        max_img_height = screen_height // rows - e
+        e = 80
+        max_img_width = self.screen_width // cols
+        max_img_height = self.screen_height // rows - e
         start_index = self.current_image
-
-        grid_width = cols * max_img_width
-        grid_height = rows * max_img_height
-        
-        px = (screen_width - grid_width) // 2 
-        py = (screen_height - grid_height) // 2
-        
+        px = (self.screen_width - (cols * max_img_width)) // 2
+        py = (self.screen_height - (rows * max_img_height)) // 2
         Iw = max_img_width - e
         Ih = max_img_height - e
-
         for i in range(rows):
             for j in range(cols):
                 if not self.images:
@@ -389,133 +348,67 @@ class Slideshow:
                 img_index = (start_index + i * cols + j) % len(self.images)
                 file_path = self.images[img_index]
                 ext = os.path.splitext(file_path)[1].lower()
-
                 x = px + j * (max_img_width)
                 y = py + i * (max_img_height)
-                w, h = max_img_width, max_img_height
-
                 if ext in VIDEO_EXTENSIONS:
-                    #img = self.get_video_thumbnail(file_path)
-                    
-                    if (self.mode==0) :
-                        img = self.get_first_non_black_frame(file_path,120) 
-                    
-                    if (self.mode==1) :
-                        img = self.get_4_non_black_frames_composed_vers1(file_path,1000)
-                        
-                    if (self.mode==2) :
-                        img = self.get_non_black_frames_composed_vers2(file_path, 4)
-                        
-                    if (self.mode==3) :
-                        img = self.get_non_black_frames_composed_vers2(file_path, 9)
-                        
-                    if (self.mode==5) :
-                        img = self.get_non_black_frames_composed_parallel(file_path, 9, self.workers)   
-
-                    
-                    width, height = img.size
-                    ratio = min(Iw / width, Ih / height)
-                    w, h = int(width * ratio), int(height * ratio)
+                    img = self.get_cached_or_generate_video_thumb(file_path)
+                    ratio = min(Iw / img.width, Ih / img.height)
+                    w, h = int(img.width * ratio), int(img.height * ratio)
                     img = img.resize((w, h), Image.LANCZOS)
                     photo_img = ImageTk.PhotoImage(img)
-                    x = x + (max_img_width - w) // 2  
-                    y = y + (max_img_height - h) // 2  
+                    x = x + (max_img_width - w) // 2
+                    y = y + (max_img_height - h) // 2
                     self.shadow(x, y, w, h)
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
-                    self.canvas.tag_bind(img_id, "<Button-1>",
-                        lambda e, path=file_path: self.open_with_default_player(path))
                     self.image_refs.append(photo_img)
-                    self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white",
-                                           font=("Helvetica", max(20, w//6), "bold"))
-                    duration = self.get_video_duration(file_path)
-                    creation_date = self.get_creation_date(file_path)
-                    info_text = f"{duration}  |  {creation_date}"
-                    self.canvas.create_text(
-                        x + w//2, y + h + 20,
-                        text=info_text,
-                        fill="white",
-                        font=("Helvetica", 8, "bold")
-                    )
-                    
+                    self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_player(path))
+                    self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
+                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_video_duration(file_path)}  |  {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+
                 elif ext in SOUND_EXTENSIONS:
                     img = self.audio_placeholder_img.copy()
-                    width, height = img.size
-                    ratio = min(Iw / width, Ih / height)
-                    w, h = int(width * ratio), int(height * ratio)
+                    ratio = min(Iw / img.width, Ih / img.height)
+                    w, h = int(img.width * ratio), int(img.height * ratio)
                     img = img.resize((w, h), Image.LANCZOS)
                     photo_img = ImageTk.PhotoImage(img)
-                    x = x + (max_img_width - w) // 2  
-                    y = y + (max_img_height - h) // 2  
+                    x = x + (max_img_width - w) // 2
+                    y = y + (max_img_height - h) // 2
                     self.shadow(x, y, w, h)
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
-                    self.canvas.tag_bind(img_id, "<Button-1>",
-                        lambda e, path=file_path: self.open_with_default_player(path))
                     self.image_refs.append(photo_img)
-                    self.canvas.create_text(x+w//2, y+h//2,text="▶",fill="white",
-                                            font=("Helvetica", max(20, w//6), "bold"))
-                      
-                    duration = self.get_audio_length(file_path)                      
-                    creation_date = self.get_creation_date(file_path)
-                    info_text = f"{duration:.2f} s |  {creation_date}"
-                    self.canvas.create_text(
-                        x + w//2, y + h + 20,
-                        text=info_text,
-                        fill="white",
-                        font=("Helvetica", 8, "bold")
-                    )
-                    
+                    self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_audio_player(path))
+                    self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
+                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_audio_length(file_path):.2f} s | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+
                 elif ext in PDF_EXTENSIONS:
                     img = self.get_first_page_from_pdf(file_path)
-                    width, height = img.size
-                    ratio = min(Iw / width, Ih / height)
-                    w, h = int(width * ratio), int(height * ratio)
+                    ratio = min(Iw / img.width, Ih / img.height)
+                    w, h = int(img.width * ratio), int(img.height * ratio)
                     img = img.resize((w, h), Image.LANCZOS)
                     photo_img = ImageTk.PhotoImage(img)
-                    x = x + (max_img_width - w) // 2  
-                    y = y + (max_img_height - h) // 2  
+                    x = x + (max_img_width - w) // 2
+                    y = y + (max_img_height - h) // 2
                     self.shadow(x, y, w, h)
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
-                    self.canvas.tag_bind(img_id, "<Button-1>",
-                        lambda e, path=file_path: self.open_with_default_player(path))
                     self.image_refs.append(photo_img)
-                    self.canvas.create_text(x+w//2, y+h//2,text="▶",fill="white",
-                                            font=("Helvetica", max(20, w//6), "bold"))
-                                          
-                    creation_date = self.get_creation_date(file_path)
-                    nb_page = self.get_pdf_page_count(file_path)
-                    info_text = f"{nb_page} Pg | {creation_date}"
-                    self.canvas.create_text(
-                        x + w//2, y + h + 20,
-                        text=info_text,
-                        fill="white",
-                        font=("Helvetica", 8, "bold")
-                    )
-    
+                    self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_player(path))
+                    self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
+                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_pdf_page_count(file_path)} Pg | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+
                 else:
                     img = Image.open(file_path)
-                    width, height = img.size
-                    ratio = min(Iw / width, Ih / height)
-                    w, h = int(width * ratio), int(height * ratio)
+                    ratio = min(Iw / img.width, Ih / img.height)
+                    w, h = int(img.width * ratio), int(img.height * ratio)
                     img = img.resize((w, h), Image.LANCZOS)
                     photo_img = ImageTk.PhotoImage(img)
-                    x = x + (max_img_width - w) // 2  
-                    y = y + (max_img_height - h) // 2  
+                    x = x + (max_img_width - w) // 2
+                    y = y + (max_img_height - h) // 2
                     self.shadow(x, y, w, h)
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
-                    self.canvas.tag_bind(img_id, "<Button-1>",
-                        lambda e, path=file_path: self.open_with_default_image_viewer(path))
-                    self.image_refs.append(photo_img)                  
-                    creation_date = self.get_creation_date(file_path)
-                    info_text = f"{creation_date}"
-                    self.canvas.create_text(
-                        x + w//2, y + h + 20,
-                        text=info_text,
-                        fill="white",
-                        font=("Helvetica", 8, "bold")
-                    )
-
+                    self.image_refs.append(photo_img)
+                    self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_image_viewer(path))
+                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
         self.slider.set(self.current_image)
-
 
     def open_with_default_player(self, video_path):
         if sys.platform.startswith('darwin'):
@@ -524,8 +417,6 @@ class Slideshow:
             os.startfile(video_path)
         elif os.name == 'posix':
             subprocess.Popen(['xdg-open', video_path])
-        else:
-            print("Unsupported OS: cannot open video.")
 
     def open_with_default_image_viewer(self, image_path):
         if sys.platform.startswith('darwin'):
@@ -534,9 +425,7 @@ class Slideshow:
             os.startfile(image_path)
         elif os.name == 'posix':
             subprocess.Popen(['xdg-open', image_path])
-        else:
-            print("Unsupported OS: cannot open image.")
-            
+
     def open_with_default_audio_player(self, audio_path):
         if sys.platform.startswith('darwin'):
             subprocess.Popen(['open', audio_path])
@@ -544,58 +433,40 @@ class Slideshow:
             os.startfile(audio_path)
         elif os.name == 'posix':
             subprocess.Popen(['xdg-open', audio_path])
-        else:
-            print("Unsupported OS: cannot open audio file.")
 
     def next_image(self):
         if self.images:
             self.current_image = (self.current_image + self.panel_step) % len(self.images)
             self.show_image()
-
     def prev_image(self):
         if self.images:
             self.current_image = (self.current_image - self.panel_step) % len(self.images)
             self.show_image()
-
     def slider_changed(self, value):
         index = int(value)
         if 0 <= index < len(self.images):
             self.current_image = index
             self.show_image()
-
-    def exit_fullscreen(self):
-        self.master.attributes('-fullscreen', False)
-
-    def exit_app_key(self, event):
-        self.master.destroy()
-
     def on_mouse_wheel(self, event):
-        if event.delta > 0:
-            self.prev_image()
-        else:
-            self.next_image()
-
-    def on_mouse_wheel_up(self, event):
-        self.prev_image()
-
-    def on_mouse_wheel_down(self, event):
-        self.next_image()
+        (self.prev_image() if event.delta > 0 else self.next_image())
+    def on_mouse_wheel_up(self, event): self.prev_image()
+    def on_mouse_wheel_down(self, event): self.next_image()
 
     def update_clock(self):
-        current_time = time.strftime('%H:%M:%S')
-        self.clock_label.config(text=current_time)
+        self.clock_label.config(text=time.strftime('%H:%M:%S'))
         self.master.after(1000, self.update_clock)
+    def exit_app_key(self, event): self.master.destroy()
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--Path', type=str, default='.', help='Path.')
-    parser.add_argument('--Cols', type=int, default=7, help='Cols.')
+    parser.add_argument('--Cols', type=int, default=7, help='Columns.')
     parser.add_argument('--Rows', type=int, default=5, help='Rows.')
     parser.add_argument('--Mode', type=int, default=0, help='Mode.')
-    parser.add_argument('--Workers', type=int, default=4, help='Number of parallel threads')
+    parser.add_argument('--Workers', type=int, default=4, help='Number of threads')
+    parser.add_argument('--QCache', type=int, default=0, help='Enable video thumbnail cache')
     args = parser.parse_args()
     root = tk.Tk()
-    slideshow = Slideshow(root, args.Path, args.Cols, args.Rows, args.Mode, args.Workers)
+    slideshow = Slideshow(root, args.Path, args.Cols, args.Rows, args.Mode, args.Workers, args.QCache)
     root.mainloop()
-
