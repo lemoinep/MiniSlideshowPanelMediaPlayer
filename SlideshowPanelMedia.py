@@ -17,6 +17,11 @@ from mutagen.wave import WAVE
 from concurrent.futures import ProcessPoolExecutor
 import fitz
 import json
+from PIL import Image  
+from pillow_heif import register_heif_opener
+import pillow_avif  
+
+register_heif_opener()  # Register HEIF support
 
 VIDEO_EXTENSIONS = ('.mp4', '.webm')
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG')
@@ -31,11 +36,11 @@ def get_cache_directory(video_path):
     cache_dir = os.path.join(video_dir, cache_name)
     return cache_dir
 
-def save_cache_config(cache_dir, cols, rows, mode):
+def save_cache_config(cache_dir, cols, rows, mode, thumb_format):
     if not os.path.isdir(cache_dir):
         os.makedirs(cache_dir)
     config_path = os.path.join(cache_dir, 'config.json')
-    config_data = {'cols': cols, 'rows': rows, 'mode': mode}
+    config_data = {'cols': cols, 'rows': rows, 'mode': mode, 'thumb_format': thumb_format}
     with open(config_path, 'w') as f:
         json.dump(config_data, f)
 
@@ -49,12 +54,12 @@ def load_cache_config(cache_dir):
     except Exception:
         return None
 
-def has_cache_config_changed(cache_dir, cols, rows, mode):
+def has_cache_config_changed(cache_dir, cols, rows, mode, thumb_format):
     config = load_cache_config(cache_dir)
     if config is None:
         return True
-    return (config.get('cols') != cols or config.get('rows') != rows or config.get('mode') != mode)
-
+    return (config.get('cols') != cols or config.get('rows') != rows or config.get('mode') != mode
+            or config.get('thumb_format') != thumb_format)
 
 def extract_frame_parallel(args):
     video_path, frame_idx = args
@@ -69,7 +74,7 @@ def extract_frame_parallel(args):
     return (frame_idx, img)
 
 class Slideshow:
-    def __init__(self, master, directory, panel_cols, panel_rows, mode, workers, qcache=False):
+    def __init__(self, master, directory, panel_cols, panel_rows, mode, workers, qcache=False,thumb_format="PNG"):
         self.master = master
         self.directory = directory
         self.panel_cols = panel_cols
@@ -77,6 +82,7 @@ class Slideshow:
         self.mode = mode
         self.workers = workers
         self.qcache = qcache
+        self.thumb_format = thumb_format.upper()
         self.panel_step = self.panel_cols * self.panel_rows
         self.current_image = 0
         self.images = self.get_images()
@@ -95,8 +101,9 @@ class Slideshow:
         self.master.bind("<Left>", lambda e: self.prev_image())
         self.master.bind("<Right>", lambda e: self.next_image())
 
+
+
     def init_video_cache(self):
-        # Find first video file to create the cache directory
         for file_path in self.images:
             if file_path.lower().endswith(VIDEO_EXTENSIONS):
                 self.cache_dir = get_cache_directory(file_path)
@@ -104,15 +111,16 @@ class Slideshow:
         if self.cache_dir:
             if not os.path.isdir(self.cache_dir):
                 os.makedirs(self.cache_dir)
-            if has_cache_config_changed(self.cache_dir, self.panel_cols, self.panel_rows, self.mode):
-                # Config changed => purge old cache
+            if has_cache_config_changed(self.cache_dir, self.panel_cols, self.panel_rows, self.mode, self.thumb_format):
+                # Purge old cached thumbnails
                 for f in os.listdir(self.cache_dir):
-                    if f.endswith(".jpg") or f.endswith(".png"):
+                    if f.lower().endswith(('.jpg', '.jpeg', '.png', '.avif', '.heif')):
                         try:
                             os.remove(os.path.join(self.cache_dir, f))
                         except:
                             pass
-                save_cache_config(self.cache_dir, self.panel_cols, self.panel_rows, self.mode)
+                save_cache_config(self.cache_dir, self.panel_cols, self.panel_rows, self.mode, self.thumb_format)
+
 
     def rgb_to_hex(self, r, g, b):
         return f"#{r:02x}{g:02x}{b:02x}"
@@ -136,7 +144,8 @@ class Slideshow:
     def get_cached_or_generate_video_thumb(self, video_path):
         if not self.qcache or not self.cache_dir:
             return self.make_video_thumb(video_path)
-        thumb_file = os.path.join(self.cache_dir, os.path.basename(video_path) + ".jpg")
+        ext = self.thumb_format.lower()
+        thumb_file = os.path.join(self.cache_dir, os.path.basename(video_path) + f".{ext}")
         if os.path.isfile(thumb_file):
             try:
                 return Image.open(thumb_file)
@@ -144,7 +153,12 @@ class Slideshow:
                 pass
         img = self.make_video_thumb(video_path)
         try:
-            img.save(thumb_file, format="JPEG")
+            if self.thumb_format in ["HEIF", "AVIF"]:
+                img.save(thumb_file, format=self.thumb_format, quality=90)
+            elif self.thumb_format in ["JPG", "JPEG"]:
+                img.save(thumb_file, format="JPEG")
+            else:
+                img.save(thumb_file, format="PNG")
         except:
             pass
         return img
@@ -470,7 +484,9 @@ if __name__ == "__main__":
     parser.add_argument('--Mode', type=int, default=0, help='Mode.')
     parser.add_argument('--Workers', type=int, default=4, help='Number of threads')
     parser.add_argument('--QCache', type=int, default=0, help='Enable video thumbnail cache')
+    parser.add_argument('--ThumbFormat', type=str, choices=["JPG", "PNG", "HEIF", "AVIF"], default="PNG",
+                       help="Format for saved thumbnails (JPG, PNG, HEIF, AVIF)")
     args = parser.parse_args()
     root = tk.Tk()
-    slideshow = Slideshow(root, args.Path, args.Cols, args.Rows, args.Mode, args.Workers, args.QCache)
+    slideshow = Slideshow(root, args.Path, args.Cols, args.Rows, args.Mode, args.Workers, args.QCache,args.ThumbFormat)
     root.mainloop()
