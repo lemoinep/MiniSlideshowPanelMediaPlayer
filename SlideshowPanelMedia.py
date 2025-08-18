@@ -215,6 +215,10 @@ class Slideshow:
         positions = [(x*size[0], y*size[1]) for y in range(grid_size) for x in range(grid_size)]
         for pos, img in zip(positions, frames_resized):
             composed_img.paste(img, pos)
+        # resize thumb    
+        h1 = 540
+        ratio = h1 / h0
+        composed_img = composed_img.resize((int(w0 * ratio), int(h0 * ratio)), Image.LANCZOS)
         return composed_img
 
     def get_non_black_frames_composed_parallel(self, video_path, num_frames=4, max_workers=4):
