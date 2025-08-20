@@ -24,7 +24,7 @@ import pillow_avif
 register_heif_opener()  # Register HEIF support
 
 VIDEO_EXTENSIONS = ('.mp4', '.webm')
-IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG')
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG',".avif",".AVIF",".heif",".HEIF",".bmp",".BMP",".tif",".TIF")
 SOUND_EXTENSIONS = ('.mp3', '.wav')
 PDF_EXTENSIONS = ('.pdf', '.PDF')
 
