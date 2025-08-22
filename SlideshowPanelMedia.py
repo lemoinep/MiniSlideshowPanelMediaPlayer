@@ -74,7 +74,7 @@ def extract_frame_parallel(args):
     return (frame_idx, img)
 
 class Slideshow:
-    def __init__(self, master, directory, panel_cols, panel_rows, mode, workers, qcache=False,thumb_format="PNG"):
+    def __init__(self, master, directory, panel_cols, panel_rows, mode, workers, qcache=False,thumb_format="PNG",SortFiles="NAME"):
         self.master = master
         self.directory = directory
         self.panel_cols = panel_cols
@@ -85,7 +85,7 @@ class Slideshow:
         self.thumb_format = thumb_format.upper()
         self.panel_step = self.panel_cols * self.panel_rows
         self.current_image = 0
-        self.images = self.get_images()
+        self.images = self.get_images(SortFiles)
         self.nb_media = len(self.images)
         self.best_grid()
         self.image_refs = []
@@ -135,23 +135,34 @@ class Slideshow:
         for r, g, b, dp in colors:
             self.canvas.create_rectangle(x+dp, y+dp, x+w+dp, y+h+dp,
                                         fill=self.rgb_to_hex(r, g, b), outline=self.rgb_to_hex(r, g, b))
-
-    def get_images(self):
+    
+    def get_images(self, sort_by='NAME'):
         files = [file for file in os.listdir(self.directory)
                  if file.lower().endswith(IMAGE_EXTENSIONS + VIDEO_EXTENSIONS + SOUND_EXTENSIONS + PDF_EXTENSIONS)]
-        return [os.path.join(self.directory, f) for f in sorted(files)]
+        if sort_by == 'NAME':
+            sorted_files = sorted(files)
+        elif sort_by == 'DATE':
+            sorted_files = sorted(files, key=lambda x: os.path.getctime(os.path.join(self.directory, x)))
+        else:
+            sorted_files = files  
+    
+        return [os.path.join(self.directory, f) for f in sorted_files]
+    
 
     def get_cached_or_generate_video_thumb(self, video_path):
         if not self.qcache or not self.cache_dir:
             return self.make_video_thumb(video_path)
         ext = self.thumb_format.lower()
         thumb_file = os.path.join(self.cache_dir, os.path.basename(video_path) + f".{ext}")
+        if not (os.path.isfile(thumb_file)):
+            img = self.make_video_thumb(video_path)
+            
         if os.path.isfile(thumb_file):
             try:
                 return Image.open(thumb_file)
             except:
                 pass
-        img = self.make_video_thumb(video_path)
+        #img = self.make_video_thumb(video_path)
         try:
             if self.thumb_format in ["HEIF", "AVIF"]:
                 img.save(thumb_file, format=self.thumb_format, quality=90)
@@ -486,7 +497,9 @@ if __name__ == "__main__":
     parser.add_argument('--QCache', type=int, default=0, help='Enable video thumbnail cache')
     parser.add_argument('--ThumbFormat', type=str, choices=["JPG", "PNG", "HEIF", "AVIF"], default="PNG",
                        help="Format for saved thumbnails (JPG, PNG, HEIF, AVIF)")
+    parser.add_argument('--SortFiles', type=str, choices=["NAME", "DATE"], default="NAME",
+                       help="Sort by NAME or DATE")
     args = parser.parse_args()
     root = tk.Tk()
-    slideshow = Slideshow(root, args.Path, args.Cols, args.Rows, args.Mode, args.Workers, args.QCache,args.ThumbFormat)
+    slideshow = Slideshow(root, args.Path, args.Cols, args.Rows, args.Mode, args.Workers, args.QCache,args.ThumbFormat,args.SortFiles)
     root.mainloop()
