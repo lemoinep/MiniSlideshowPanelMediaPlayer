@@ -142,6 +142,100 @@ def view_picture_zoom(img):
         if key == 27:
             break
     cv2.destroyAllWindows()
+    
+
+def play_video_with_seek_and_pause(video_path):
+    zoom_scale = 1.0
+    zoom_min = 1.0
+    zoom_max = 15.0
+    mouse_x, mouse_y = -1, -1
+    
+    def mouse_callback(event, x, y, flags, param):
+        nonlocal zoom_scale, mouse_x, mouse_y, current_frame, paused
+        mouse_x, mouse_y = x, y
+        if event == cv2.EVENT_MOUSEWHEEL:
+            if flags > 0:
+                zoom_scale = min(zoom_scale + 0.1, zoom_max)
+            else:
+                zoom_scale = max(zoom_scale - 0.1, zoom_min)
+        elif event == cv2.EVENT_LBUTTONDOWN:
+            clicked_frame = int((x / width) * frame_count)
+            clicked_frame = max(0, min(clicked_frame, frame_count - 1))
+            current_frame = clicked_frame
+            cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+            paused = False
+    
+    def get_zoomed_image(image, scale, center_x, center_y):
+        h, w = image.shape[:2]
+        new_w = int(w / scale)
+        new_h = int(h / scale)
+
+        left = max(center_x - new_w // 2, 0)
+        right = min(center_x + new_w // 2, w)
+        top = max(center_y - new_h // 2, 0)
+        bottom = min(center_y + new_h // 2, h)
+
+        if right - left < new_w:
+            if left == 0:
+                right = new_w
+            elif right == w:
+                left = w - new_w
+        if bottom - top < new_h:
+            if top == 0:
+                bottom = new_h
+            elif bottom == h:
+                top = h - new_h
+
+        cropped = image[top:bottom, left:right]
+        zoomed = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+        return zoomed  
+    
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print("Error Open Movie.")
+        return
+
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps == 0:
+        fps = 25 
+
+    paused = False
+    current_frame = 0
+
+    cv2.namedWindow("Movie Player", cv2.WINDOW_NORMAL)
+    ratio = width / height
+    cv2.resizeWindow('Movie Player', int(600 * ratio), 600)
+    cv2.setMouseCallback("Movie Player", mouse_callback)
+
+    while True:
+        if not paused:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            current_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+            if mouse_x == -1 or mouse_y == -1:
+                mouse_x, mouse_y = width // 2, height // 2
+        else:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+        zoomed_img = get_zoomed_image(frame, zoom_scale, mouse_x, mouse_y)
+        cv2.imshow('Movie Player', zoomed_img)
+
+        key = cv2.waitKey(int(1000 / fps)) & 0xFF
+        if key == 27:  
+            break
+        elif key == ord(' '): 
+            paused = not paused
+
+    cap.release()
+    cv2.destroyAllWindows()
+
 
 class Slideshow:
     def __init__(self, master, directory, panel_cols, panel_rows, mode, workers, qcache=False,thumb_format="PNG",SortFiles="NAME", qModeSoftwareView=True):
@@ -511,12 +605,15 @@ class Slideshow:
         self.slider.set(self.current_image)
 
     def open_with_default_player(self, video_path):
-        if sys.platform.startswith('darwin'):
-            subprocess.Popen(['open', video_path])
-        elif os.name == 'nt':
-            os.startfile(video_path)
-        elif os.name == 'posix':
-            subprocess.Popen(['xdg-open', video_path])
+        if self.qModeSoftwareView:
+            if sys.platform.startswith('darwin'):
+                subprocess.Popen(['open', video_path])
+            elif os.name == 'nt':
+                os.startfile(video_path)
+            elif os.name == 'posix':
+                subprocess.Popen(['xdg-open', video_path])
+        else :
+            play_video_with_seek_and_pause(video_path)
 
     def open_with_default_image_viewer(self, image_path):
         if self.qModeSoftwareView:
