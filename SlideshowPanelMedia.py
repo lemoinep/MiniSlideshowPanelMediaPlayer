@@ -73,8 +73,78 @@ def extract_frame_parallel(args):
     img = Image.fromarray(frame_rgb)
     return (frame_idx, img)
 
+
+def cv_save_image_to_avif(img, output_path, quality=80):
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(img_rgb)
+    pil_img.save(output_path, 'AVIF', quality=quality)
+
+def cv_load_image_avif(path):
+    pil_img = Image.open(path).convert("RGB")
+    img_np = np.array(pil_img)
+    img_cv = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+    return img_cv
+
+def view_picture_zoom(img):
+    zoom_scale = 1.0
+    zoom_min = 1.0
+    zoom_max = 15.0
+    mouse_x, mouse_y = -1, -1
+    height, width = img.shape[:2]
+    
+    def mouse_callback(event, x, y, flags, param):
+        nonlocal zoom_scale, mouse_x, mouse_y
+        mouse_x, mouse_y = x, y
+        if event == cv2.EVENT_MOUSEWHEEL:
+            if flags > 0:
+                zoom_scale = min(zoom_scale + 0.1, zoom_max)
+            else:
+                zoom_scale = max(zoom_scale - 0.1, zoom_min)
+
+    def get_zoomed_image(image, scale, center_x, center_y):
+        h, w = image.shape[:2]
+        new_w = int(w / scale)
+        new_h = int(h / scale)
+
+        left = max(center_x - new_w // 2, 0)
+        right = min(center_x + new_w // 2, w)
+        top = max(center_y - new_h // 2, 0)
+        bottom = min(center_y + new_h // 2, h)
+
+        if right - left < new_w:
+            if left == 0:
+                right = new_w
+            elif right == w:
+                left = w - new_w
+        if bottom - top < new_h:
+            if top == 0:
+                bottom = new_h
+            elif bottom == h:
+                top = h - new_h
+
+        cropped = image[top:bottom, left:right]
+        zoomed = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+        return zoomed
+
+    cv2.namedWindow('Picture Zoom', cv2.WINDOW_NORMAL)
+    ratio = width / height
+    cv2.resizeWindow('Picture Zoom', int (600 * ratio), 600)
+    cv2.setMouseCallback('Picture Zoom', mouse_callback)
+
+    while True:
+        if mouse_x == -1 and mouse_y == -1:
+            mouse_x, mouse_y = width // 2, height // 2
+
+        zoomed_img = get_zoomed_image(img, zoom_scale, mouse_x, mouse_y)
+        cv2.imshow('Picture Zoom', zoomed_img)
+
+        key = cv2.waitKey(20) & 0xFF
+        if key == 27:
+            break
+    cv2.destroyAllWindows()
+
 class Slideshow:
-    def __init__(self, master, directory, panel_cols, panel_rows, mode, workers, qcache=False,thumb_format="PNG",SortFiles="NAME"):
+    def __init__(self, master, directory, panel_cols, panel_rows, mode, workers, qcache=False,thumb_format="PNG",SortFiles="NAME", qModeSoftwareView=True):
         self.master = master
         self.directory = directory
         self.panel_cols = panel_cols
@@ -82,6 +152,7 @@ class Slideshow:
         self.mode = mode
         self.workers = workers
         self.qcache = qcache
+        self.qModeSoftwareView = qModeSoftwareView
         self.thumb_format = thumb_format.upper()
         self.panel_step = self.panel_cols * self.panel_rows
         self.current_image = 0
@@ -448,13 +519,22 @@ class Slideshow:
             subprocess.Popen(['xdg-open', video_path])
 
     def open_with_default_image_viewer(self, image_path):
-        if sys.platform.startswith('darwin'):
-            subprocess.Popen(['open', image_path])
-        elif os.name == 'nt':
-            os.startfile(image_path)
-        elif os.name == 'posix':
-            subprocess.Popen(['xdg-open', image_path])
-
+        if self.qModeSoftwareView:
+            if sys.platform.startswith('darwin'):
+                subprocess.Popen(['open', image_path])
+            elif os.name == 'nt':
+                os.startfile(image_path)
+            elif os.name == 'posix':
+                subprocess.Popen(['xdg-open', image_path])        
+        else :
+            if image_path.lower().endswith(('.avif','.heif')):
+                img=cv_load_image_avif(image_path)
+                view_picture_zoom(img)
+            else:    
+                img = cv2.imread(image_path)
+                view_picture_zoom(img)
+        
+    
     def open_with_default_audio_player(self, audio_path):
         if sys.platform.startswith('darwin'):
             subprocess.Popen(['open', audio_path])
@@ -495,11 +575,13 @@ if __name__ == "__main__":
     parser.add_argument('--Mode', type=int, default=0, help='Mode.')
     parser.add_argument('--Workers', type=int, default=4, help='Number of threads')
     parser.add_argument('--QCache', type=int, default=0, help='Enable video thumbnail cache')
+    parser.add_argument('--QModeSoftwareView', type=int, default=1, help='Enable ModeSoftwareView')
+    
     parser.add_argument('--ThumbFormat', type=str, choices=["JPG", "PNG", "HEIF", "AVIF"], default="PNG",
                        help="Format for saved thumbnails (JPG, PNG, HEIF, AVIF)")
     parser.add_argument('--SortFiles', type=str, choices=["NAME", "DATE"], default="NAME",
                        help="Sort by NAME or DATE")
     args = parser.parse_args()
     root = tk.Tk()
-    slideshow = Slideshow(root, args.Path, args.Cols, args.Rows, args.Mode, args.Workers, args.QCache,args.ThumbFormat,args.SortFiles)
+    slideshow = Slideshow(root, args.Path, args.Cols, args.Rows, args.Mode, args.Workers, args.QCache,args.ThumbFormat,args.SortFiles,args.QModeSoftwareView)
     root.mainloop()
