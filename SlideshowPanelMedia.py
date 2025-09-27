@@ -19,7 +19,8 @@ import fitz
 import json
 from PIL import Image  
 from pillow_heif import register_heif_opener
-import pillow_avif  
+import pillow_avif 
+from pathlib import Path 
 
 register_heif_opener()  # Register HEIF support
 
@@ -85,13 +86,54 @@ def cv_load_image_avif(path):
     img_cv = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
     return img_cv
 
-def view_picture_zoom(img):
+def CV_Sharpen2d(source, alpha, gamma, num_op):
+    def sharpen_kernel(src):
+        kernel = np.array([[0, -1, 0],
+                           [-1, 5, -1],
+                           [0, -1, 0]])
+        return cv2.filter2D(src, -1, kernel)
+
+    dst = sharpen_kernel(source)
+
+    if num_op == 1:
+        source_filtered = cv2.GaussianBlur(source, (3, 3), 0)
+    elif num_op == 2:
+        source_filtered = cv2.blur(source, (9, 9))
+    else:
+        source_filtered = source.copy()
+
+    dst_img = cv2.addWeighted(source_filtered, alpha, dst, 1.0 - alpha, gamma)
+    return dst_img
+
+def CV_EnhanceColor(img):
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
+    hsv[..., 1] = np.clip(hsv[..., 1] * 1.3, 0, 255) 
+    hsv[..., 2] = np.clip(hsv[..., 2] * 1.1, 0, 255)  
+    return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+
+
+def CV_Vibrance2D(img, saturation_scale=1.3, brightness_scale=1.1, apply=True):
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
+    hsv[..., 1] = np.clip(hsv[..., 1] * saturation_scale, 0, 255)
+    hsv[..., 2] = np.clip(hsv[..., 2] * brightness_scale, 0, 255)
+    return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+
+def view_picture_zoom(image_path):
+ 
+    if image_path.lower().endswith(('.avif','.heif')):
+        img=cv_load_image_avif(image_path)
+    else:    
+        img = cv2.imread(image_path)
+              
     zoom_scale = 1.0
     zoom_min = 1.0
     zoom_max = 15.0
     mouse_x, mouse_y = -1, -1
     height, width = img.shape[:2]
     qLoop = True
+    qSharpen = False
+    qEnhanceColor = False
+    qVibrance = False
     
     def mouse_callback(event, x, y, flags, param):
         nonlocal zoom_scale, mouse_x, mouse_y, qLoop 
@@ -132,7 +174,8 @@ def view_picture_zoom(img):
 
     cv2.namedWindow('Picture Zoom', cv2.WINDOW_NORMAL)
     ratio = width / height
-    cv2.resizeWindow('Picture Zoom', int (600 * ratio), 600)
+    lh = 900
+    cv2.resizeWindow('Picture Zoom', int (lh * ratio), lh)
     cv2.setMouseCallback('Picture Zoom', mouse_callback)
 
     while qLoop:
@@ -140,11 +183,34 @@ def view_picture_zoom(img):
             mouse_x, mouse_y = width // 2, height // 2
 
         zoomed_img = get_zoomed_image(img, zoom_scale, mouse_x, mouse_y)
+        if qSharpen :
+            zoomed_img = CV_Sharpen2d(zoomed_img, 0.1, 0.0,  1)
+        if qEnhanceColor :
+            zoomed_img = CV_EnhanceColor(zoomed_img)
+        if qVibrance :
+            zoomed_img = CV_Vibrance2D(zoomed_img)
+        
+        
         cv2.imshow('Picture Zoom', zoomed_img)
 
         key = cv2.waitKey(20) & 0xFF
         if key == 27:
             break
+        elif key == ord('s'):
+            path = Path(image_path).parent
+            new_path = path / "Screenshot"
+            new_path .mkdir(parents=True, exist_ok=True)
+            date_time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+            outputName = "Noname"
+            outputName = f"{outputName}_{date_time}.jpg"
+            outputName = Path(new_path) / outputName
+            cv2.imwrite(outputName, zoomed_img)
+        elif key == ord('x'):  
+            qSharpen = not qSharpen
+        elif key == ord('e'):  
+            qEnhanceColor = not qEnhanceColor
+        elif key == ord('v'):  
+            qVibrance = not qVibrance
     cv2.destroyAllWindows()
     
 
@@ -154,6 +220,10 @@ def play_video_with_seek_and_pause(video_path):
     zoom_max = 15.0
     mouse_x, mouse_y = -1, -1
     qLoop = True
+    qSharpen = False
+    qEnhanceColor = False
+    qVibrance = False
+    qLoopVideo = False
     
     def mouse_callback(event, x, y, flags, param):
         nonlocal zoom_scale, mouse_x, mouse_y, current_frame, paused, qLoop
@@ -208,18 +278,23 @@ def play_video_with_seek_and_pause(video_path):
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     if fps == 0:
-        fps = 25 
+        fps = 30 
 
     paused = False
     current_frame = 0
 
     cv2.namedWindow("Movie Player", cv2.WINDOW_NORMAL)
     ratio = width / height
-    cv2.resizeWindow('Movie Player', int(600 * ratio), 600)
+    lh = 900
+    cv2.resizeWindow('Movie Player', int(lh * ratio), lh)
     cv2.setMouseCallback("Movie Player", mouse_callback)
 
     while qLoop:
         if not paused:
+            if qLoopVideo and (current_frame>=frame_count-1) :
+                current_frame = 1
+                cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+                
             ret, frame = cap.read()
             if not ret:
                 break
@@ -233,13 +308,46 @@ def play_video_with_seek_and_pause(video_path):
                 break
 
         zoomed_img = get_zoomed_image(frame, zoom_scale, mouse_x, mouse_y)
+        if qSharpen :
+            zoomed_img = CV_Sharpen2d(zoomed_img, 0.1, 0.0,  1)
+        if qEnhanceColor :
+            zoomed_img = CV_EnhanceColor(zoomed_img)
+        if qVibrance :
+            zoomed_img = CV_Vibrance2D(zoomed_img)
+            
+            
         cv2.imshow('Movie Player', zoomed_img)
-
+        
         key = cv2.waitKey(int(1000 / fps)) & 0xFF
         if key == 27:  
             break
         elif key == ord(' '): 
             paused = not paused
+        elif key == ord('+'):
+            current_frame = current_frame + 1
+        elif key == ord('-'):
+            current_frame = current_frame - 1
+        elif key == ord('-'):
+            current_frame = current_frame - 1
+        elif key == ord('s'):
+            path = Path(video_path).parent
+            new_path = path / "Screenshot"
+            new_path .mkdir(parents=True, exist_ok=True)
+            date_time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+            outputName = "Noname"
+            outputName = f"{outputName}_{date_time}.jpg"
+            outputName = Path(new_path) / outputName
+            cv2.imwrite(outputName, zoomed_img)
+        elif key == ord('x'):  
+            qSharpen = not qSharpen
+        elif key == ord('e'):  
+            qEnhanceColor = not qEnhanceColor
+        elif key == ord('v'):  
+            qVibrance = not qVibrance    
+        elif key == ord('l'):  
+            qLoopVideo = not qLoopVideo 
+            
+
 
     cap.release()
     cv2.destroyAllWindows()
@@ -273,6 +381,8 @@ class Slideshow:
         self.master.bind("<space>", lambda e: self.next_image())
         self.master.bind("<Left>", lambda e: self.prev_image())
         self.master.bind("<Right>", lambda e: self.next_image())
+        
+        self.master.bind("m", self.mode_soft_app_key)
 
 
 
@@ -632,14 +742,9 @@ class Slideshow:
             elif os.name == 'posix':
                 subprocess.Popen(['xdg-open', image_path])        
         else :
-            if image_path.lower().endswith(('.avif','.heif')):
-                img=cv_load_image_avif(image_path)
-                view_picture_zoom(img)
-            else:    
-                img = cv2.imread(image_path)
-                view_picture_zoom(img)
+            view_picture_zoom(image_path)
+
         
-    
     def open_with_default_audio_player(self, audio_path):
         if sys.platform.startswith('darwin'):
             subprocess.Popen(['open', audio_path])
@@ -665,11 +770,18 @@ class Slideshow:
         (self.prev_image() if event.delta > 0 else self.next_image())
     def on_mouse_wheel_up(self, event): self.prev_image()
     def on_mouse_wheel_down(self, event): self.next_image()
+    
+    def mode_soft_app_key(self, event): 
+        self.qModeSoftwareView = not self.qModeSoftwareView   
 
     def update_clock(self):
         self.clock_label.config(text=time.strftime('%H:%M:%S'))
         self.master.after(1000, self.update_clock)
     def exit_app_key(self, event): self.master.destroy()
+    
+
+    
+    
 
 if __name__ == "__main__":
     import argparse
