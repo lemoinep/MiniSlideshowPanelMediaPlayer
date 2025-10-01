@@ -118,6 +118,7 @@ def CV_Vibrance2D(img, saturation_scale=1.3, brightness_scale=1.1, apply=True):
     hsv[..., 2] = np.clip(hsv[..., 2] * brightness_scale, 0, 255)
     return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
 
+
 def view_picture_zoom(image_path):
  
     if image_path.lower().endswith(('.avif','.heif')):
@@ -172,11 +173,20 @@ def view_picture_zoom(image_path):
         zoomed = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
         return zoomed
 
-    cv2.namedWindow('Picture Zoom', cv2.WINDOW_NORMAL)
+    window_name = 'Picture Zoom'
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     ratio = width / height
     lh = 900
-    cv2.resizeWindow('Picture Zoom', int (lh * ratio), lh)
-    cv2.setMouseCallback('Picture Zoom', mouse_callback)
+    lw = int(lh * ratio)
+    cv2.resizeWindow(window_name, lw, lh)
+    cv2.setMouseCallback(window_name, mouse_callback)
+    
+    screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
+    screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080  
+
+    start_x = int((screen_width - lw) / 2)
+    start_y = int((screen_height - lh) / 2)
+    cv2.moveWindow(window_name, start_x, start_y)
 
     while qLoop:
         if mouse_x == -1 and mouse_y == -1:
@@ -224,6 +234,17 @@ def play_video_with_seek_and_pause(video_path):
     qEnhanceColor = False
     qVibrance = False
     qLoopVideo = False
+    qDrawLineOnImage = False
+    
+    def draw_line_on_image(num_frame, nb_frames,img):
+        height, width = img.shape[:2]
+        ratio = num_frame / nb_frames
+        x = int(ratio * width)    
+        image_with_line = img.copy()
+        cv2.line(image_with_line,(0, height-9), (x, height-9),(0, 0, 0), 6)
+        cv2.line(image_with_line,(0, height-10), (x, height-10),(0, 0, 125), 6)
+        cv2.line(image_with_line,(0, height-10), (x, height-10),(0, 0, 255), 3)
+        return image_with_line
     
     def mouse_callback(event, x, y, flags, param):
         nonlocal zoom_scale, mouse_x, mouse_y, current_frame, paused, qLoop
@@ -283,11 +304,23 @@ def play_video_with_seek_and_pause(video_path):
     paused = False
     current_frame = 0
 
-    cv2.namedWindow("Movie Player", cv2.WINDOW_NORMAL)
+    window_name = 'Movie Player'
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     ratio = width / height
     lh = 900
-    cv2.resizeWindow('Movie Player', int(lh * ratio), lh)
-    cv2.setMouseCallback("Movie Player", mouse_callback)
+    lw = int(lh * ratio)
+    cv2.resizeWindow(window_name, lw, lh)
+    cv2.setMouseCallback(window_name, mouse_callback)
+    
+    screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
+    screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080  
+
+    start_x = int((screen_width - lw) / 2)
+    start_y = int((screen_height - lh) / 2)
+    cv2.moveWindow(window_name, start_x, start_y)
+    
+    
+    cv2.setMouseCallback(window_name, mouse_callback)
 
     while qLoop:
         if not paused:
@@ -314,6 +347,9 @@ def play_video_with_seek_and_pause(video_path):
             zoomed_img = CV_EnhanceColor(zoomed_img)
         if qVibrance :
             zoomed_img = CV_Vibrance2D(zoomed_img)
+            
+        if qDrawLineOnImage :
+            zoomed_img=draw_line_on_image(current_frame, frame_count, zoomed_img)
             
             
         cv2.imshow('Movie Player', zoomed_img)
@@ -346,9 +382,9 @@ def play_video_with_seek_and_pause(video_path):
             qVibrance = not qVibrance    
         elif key == ord('l'):  
             qLoopVideo = not qLoopVideo 
+        elif key == ord('L'):  
+            qDrawLineOnImage = not qDrawLineOnImage    
             
-
-
     cap.release()
     cv2.destroyAllWindows()
 
@@ -703,7 +739,7 @@ class Slideshow:
                     self.shadow(x, y, w, h)
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
                     self.image_refs.append(photo_img)
-                    self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_player(path))
+                    self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_pdf_player(path))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_pdf_page_count(file_path)} Pg | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
 
@@ -732,6 +768,18 @@ class Slideshow:
                 subprocess.Popen(['xdg-open', video_path])
         else :
             play_video_with_seek_and_pause(video_path)
+            
+    def open_with_default_pdf_player(self, pdf_path):
+        #if self.qModeSoftwareView:
+        if True:
+            if sys.platform.startswith('darwin'):
+                subprocess.Popen(['open', pdf_path])
+            elif os.name == 'nt':
+                os.startfile(pdf_path)
+            elif os.name == 'posix':
+                subprocess.Popen(['xdg-open', pdf_path])
+        else :
+            play_video_with_seek_and_pause(pdf_path)
 
     def open_with_default_image_viewer(self, image_path):
         if self.qModeSoftwareView:
