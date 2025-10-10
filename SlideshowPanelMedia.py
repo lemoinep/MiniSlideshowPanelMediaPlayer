@@ -119,6 +119,39 @@ def CV_Vibrance2D(img, saturation_scale=1.3, brightness_scale=1.1, apply=True):
     return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
 
 
+def CV_AdjustBrightnessContrast(img,brightness=10,contrast=2.3): 
+    imgR = cv2.addWeighted(img, contrast, np.zeros(img.shape, img.dtype), 0, brightness) 
+    return imgR
+
+
+def CV_AdaptativeContrast(img,clip=9):
+    lab=cv2.cvtColor(img,cv2.COLOR_BGR2LAB)
+    l,a,b=cv2.split(lab)
+    clahe=cv2.createCLAHE(clipLimit=clip,tileGridSize=(8,8))
+    merged=cv2.merge((clahe.apply(l),a,b))
+    dest=cv2.cvtColor(merged,cv2.COLOR_LAB2BGR)
+    return (dest)
+
+
+def CV_CLAHE(img, clipLimit=2.0, tileGridSize=(8,8)):
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=clipLimit, tileGridSize=tileGridSize)
+    cl = clahe.apply(l)
+    limg = cv2.merge((cl, a, b))
+    return cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+
+
+def CV_SaliencyAddWeighted(img, alpha=0.6, beta=0.4, gamma=0):
+    saliency = cv2.saliency.StaticSaliencySpectralResidual_create()
+    success, saliencyMap = saliency.computeSaliency(img)
+    if not success:
+        return img
+    saliencyMap = (saliencyMap * 255).astype(np.uint8)
+    saliencyMap_color = cv2.cvtColor(saliencyMap, cv2.COLOR_GRAY2BGR)
+    return cv2.addWeighted(img, alpha, saliencyMap_color, beta, gamma)
+
+
 def view_picture_zoom(image_path):
  
     if image_path.lower().endswith(('.avif','.heif')):
@@ -135,6 +168,10 @@ def view_picture_zoom(image_path):
     qSharpen = False
     qEnhanceColor = False
     qVibrance = False
+    qSaliency = False
+    qClache   = False
+    qBrightnessContrast = False
+    qAdaptativeContrast = False
     
     def mouse_callback(event, x, y, flags, param):
         nonlocal zoom_scale, mouse_x, mouse_y, qLoop 
@@ -193,12 +230,21 @@ def view_picture_zoom(image_path):
             mouse_x, mouse_y = width // 2, height // 2
 
         zoomed_img = get_zoomed_image(img, zoom_scale, mouse_x, mouse_y)
+        if qClache  :
+            zoomed_img = CV_CLAHE(zoomed_img)
         if qSharpen :
-            zoomed_img = CV_Sharpen2d(zoomed_img, 0.1, 0.0,  1)
+            zoomed_img = CV_Sharpen2d(zoomed_img, 0.1, 0.0,  1)       
         if qEnhanceColor :
             zoomed_img = CV_EnhanceColor(zoomed_img)
         if qVibrance :
             zoomed_img = CV_Vibrance2D(zoomed_img)
+        if qBrightnessContrast :
+            zoomed_img = CV_AdjustBrightnessContrast(zoomed_img)
+        if qAdaptativeContrast :
+            zoomed_img = CV_AdaptativeContrast(zoomed_img)
+        if qSaliency :
+            zoomed_img = CV_SaliencyAddWeighted(zoomed_img)
+            
         
         
         cv2.imshow('Picture Zoom', zoomed_img)
@@ -221,6 +267,16 @@ def view_picture_zoom(image_path):
             qEnhanceColor = not qEnhanceColor
         elif key == ord('v'):  
             qVibrance = not qVibrance
+        elif key == ord('a'):  
+            qSaliency = not qSaliency
+        elif key == ord('h'):   
+            qClache = not qClache
+        elif key == ord('b'): 
+            qBrightnessContrast = not qBrightnessContrast
+        elif key == ord('c'):   
+            qAdaptativeContrast = not qAdaptativeContrast
+        elif key == ord('.'):  
+            zoom_scale = 1.0
     cv2.destroyAllWindows()
     
 
@@ -235,6 +291,10 @@ def play_video_with_seek_and_pause(video_path):
     qVibrance = False
     qLoopVideo = False
     qDrawLineOnImage = False
+    qSaliency = False
+    qClache   = False
+    qBrightnessContrast = False
+    qAdaptativeContrast = False
     
     def draw_line_on_image(num_frame, nb_frames,img):
         height, width = img.shape[:2]
@@ -341,12 +401,20 @@ def play_video_with_seek_and_pause(video_path):
                 break
 
         zoomed_img = get_zoomed_image(frame, zoom_scale, mouse_x, mouse_y)
+        if qClache  :
+            zoomed_img = CV_CLAHE(zoomed_img)
         if qSharpen :
             zoomed_img = CV_Sharpen2d(zoomed_img, 0.1, 0.0,  1)
         if qEnhanceColor :
             zoomed_img = CV_EnhanceColor(zoomed_img)
         if qVibrance :
             zoomed_img = CV_Vibrance2D(zoomed_img)
+        if qBrightnessContrast :
+            zoomed_img = CV_AdjustBrightnessContrast(zoomed_img)
+        if qAdaptativeContrast :
+            zoomed_img = CV_AdaptativeContrast(zoomed_img)
+        if qSaliency :
+            zoomed_img = CV_SaliencyAddWeighted(zoomed_img)
             
         if qDrawLineOnImage :
             zoomed_img=draw_line_on_image(current_frame, frame_count, zoomed_img)
@@ -383,7 +451,17 @@ def play_video_with_seek_and_pause(video_path):
         elif key == ord('l'):  
             qLoopVideo = not qLoopVideo 
         elif key == ord('L'):  
-            qDrawLineOnImage = not qDrawLineOnImage    
+            qDrawLineOnImage = not qDrawLineOnImage 
+        elif key == ord('a'):  
+            qSaliency = not qSaliency
+        elif key == ord('h'):   
+            qClache = not qClache
+        elif key == ord('b'): 
+            qBrightnessContrast = not qBrightnessContrast
+        elif key == ord('c'):   
+            qAdaptativeContrast = not qAdaptativeContrast
+        elif key == ord('.'):  
+            zoom_scale = 1.0
             
     cap.release()
     cv2.destroyAllWindows()
