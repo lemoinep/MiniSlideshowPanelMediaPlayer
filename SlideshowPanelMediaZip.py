@@ -1,6 +1,6 @@
 # Author(s): Dr. Patrick Lemoine
 # Objective: create a media panel, click on the video and play it or ...
-# add cache option for movies
+# add cache option for movies and pictures in Zip
 
 import tkinter as tk
 from PIL import Image, ImageTk
@@ -21,6 +21,8 @@ from PIL import Image
 from pillow_heif import register_heif_opener
 import pillow_avif 
 from pathlib import Path 
+from zipfile import ZipFile, ZIP_DEFLATED, is_zipfile
+from io import BytesIO
 
 register_heif_opener()  # Register HEIF support
 
@@ -28,6 +30,81 @@ VIDEO_EXTENSIONS = ('.mp4', '.webm')
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG',".avif",".AVIF",".heif",".HEIF",".bmp",".BMP",".tif",".TIF")
 SOUND_EXTENSIONS = ('.mp3', '.wav')
 PDF_EXTENSIONS = ('.pdf', '.PDF')
+
+
+
+
+def get_cache_zip_path(video_path):
+    video_dir = os.path.dirname(video_path)
+    return os.path.join(video_dir, "cache_thumbs.zip")
+
+def save_cache_config_to_zip(zip_path, cols, rows, mode, thumb_format):
+    config_data = {'cols': cols, 'rows': rows, 'mode': mode, 'thumb_format': thumb_format}
+    with ZipFile(zip_path, 'a', compression=ZIP_DEFLATED) as zipf:
+        zipf.writestr('config.json', json.dumps(config_data))
+
+def load_cache_config_from_zip(zip_path):
+    if not os.path.isfile(zip_path) or not is_zipfile(zip_path):
+        return None
+    with ZipFile(zip_path, 'r') as zipf:
+        if 'config.json' not in zipf.namelist():
+            return None
+        return json.loads(zipf.read('config.json').decode())
+
+def has_cache_config_changed_zip(zip_path, cols, rows, mode, thumb_format):
+    config = load_cache_config_from_zip(zip_path)
+    if config is None:
+        return True
+    return (config.get('cols') != cols or config.get('rows') != rows or
+        config.get('mode') != mode or config.get('thumb_format') != thumb_format)
+
+def save_image_to_zip(zip_path, name, image, fmt="PNG"):
+    temp_images = {}
+    if os.path.isfile(zip_path) and is_zipfile(zip_path):
+        with ZipFile(zip_path, 'r') as zipf:
+            for f in zipf.namelist():
+                if f != name:
+                    temp_images[f] = zipf.read(f)
+    with ZipFile(zip_path, 'w', compression=ZIP_DEFLATED) as zipf:
+        for f, data in temp_images.items():
+            zipf.writestr(f, data)
+        bio = BytesIO()
+        image.save(bio, fmt)
+        zipf.writestr(name, bio.getvalue())
+
+def load_image_from_zip(zip_path, name):
+    if not os.path.isfile(zip_path) or not is_zipfile(zip_path):
+        return None
+    with ZipFile(zip_path, 'r') as zipf:
+        if name not in zipf.namelist():
+            return None
+        data = zipf.read(name)
+        return Image.open(BytesIO(data))
+
+def purge_zip_except_config(zip_path):
+
+    if not os.path.isfile(zip_path) or not is_zipfile(zip_path):
+        return
+    with ZipFile(zip_path, 'r') as zin:
+        files = zin.namelist()
+        config = zin.read('config.json') if 'config.json' in files else None
+    with ZipFile(zip_path, 'w', compression=ZIP_DEFLATED) as zout:
+        if config: zout.writestr('config.json', config)
+
+
+def extract_frame_parallel(args):
+    video_path, frame_idx = args
+    cap = cv2.VideoCapture(video_path)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+    ret, frame = cap.read()
+    cap.release()
+    if not ret:
+        return (frame_idx, None)
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    img = Image.fromarray(frame_rgb)
+    return (frame_idx, img)
+
+
 
 
 def get_cache_directory(video_path):
@@ -468,7 +545,7 @@ def play_video_with_seek_and_pause(video_path):
 
 
 class Slideshow:
-    def __init__(self, master, directory, panel_cols, panel_rows, mode, workers, qcache=False,thumb_format="PNG",SortFiles="NAME", qModeSoftwareView=True):
+    def __init__(self, master, directory, panel_cols, panel_rows, mode, workers, qcache=False,thumb_format="PNG", thumbSizeCache=540, SortFiles="NAME", qModeSoftwareView=True):
         self.master = master
         self.directory = directory
         self.panel_cols = panel_cols
@@ -476,6 +553,7 @@ class Slideshow:
         self.mode = mode
         self.workers = workers
         self.qcache = qcache
+        self.thumbSizeCache = thumbSizeCache
         self.qModeSoftwareView = qModeSoftwareView
         self.thumb_format = thumb_format.upper()
         self.panel_step = self.panel_cols * self.panel_rows
@@ -486,9 +564,11 @@ class Slideshow:
         self.image_refs = []
         PathW = os.path.dirname(sys.argv[0])
         self.audio_placeholder_img = Image.open(PathW + "/audio.jpg")
-        self.cache_dir = None
+            
+        self.cache_zip_path = None
         if self.qcache:
-            self.init_video_cache()
+            self.init_video_cache_zip()
+        
         self.setup_ui()
         self.update_clock()
         self.master.bind("<Escape>", self.exit_app_key)
@@ -499,26 +579,51 @@ class Slideshow:
         self.master.bind("m", self.mode_soft_app_key)
 
 
-
-    def init_video_cache(self):
+    def init_video_cache_zip(self):
         for file_path in self.images:
-            if file_path.lower().endswith(VIDEO_EXTENSIONS):
-                self.cache_dir = get_cache_directory(file_path)
+            if file_path.lower().endswith(VIDEO_EXTENSIONS+IMAGE_EXTENSIONS):
+                self.cache_zip_path = get_cache_zip_path(file_path)
                 break
-        if self.cache_dir:
-            if not os.path.isdir(self.cache_dir):
-                os.makedirs(self.cache_dir)
-            if has_cache_config_changed(self.cache_dir, self.panel_cols, self.panel_rows, self.mode, self.thumb_format):
-                # Purge old cached thumbnails
-                for f in os.listdir(self.cache_dir):
-                    if f.lower().endswith(('.jpg', '.jpeg', '.png', '.avif', '.heif')):
-                        try:
-                            os.remove(os.path.join(self.cache_dir, f))
-                        except:
-                            pass
-                save_cache_config(self.cache_dir, self.panel_cols, self.panel_rows, self.mode, self.thumb_format)
+        if self.cache_zip_path:
+            if has_cache_config_changed_zip(self.cache_zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format):
+                if os.path.isfile(self.cache_zip_path):
+                    os.remove(self.cache_zip_path)
+                save_cache_config_to_zip(self.cache_zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format)
 
+    def get_cached_or_generate_video_thumb(self, video_path):
+        if not self.qcache:
+            return self.make_video_thumb(video_path)
+        zip_path = get_cache_zip_path(video_path)
+        if has_cache_config_changed_zip(zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format):
+            if os.path.isfile(zip_path):
+                os.remove(zip_path)
+            save_cache_config_to_zip(zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format)
+        thumb_name = os.path.basename(video_path) + "." + self.thumb_format.lower()
+        cached_img = load_image_from_zip(zip_path, thumb_name)
+        if cached_img:
+            return cached_img
+        img = self.make_video_thumb(video_path)
+        save_image_to_zip(zip_path, thumb_name, img, self.thumb_format)
+        return img
+   
+    
+    def get_cached_or_generate_picture_thumb(self, picture_path):
+        if not self.qcache:
+            return self.make_picture_thumb(picture_path)
+        zip_path = get_cache_zip_path(picture_path)
+        if has_cache_config_changed_zip(zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format):
+            if os.path.isfile(zip_path):
+                os.remove(zip_path)
+            save_cache_config_to_zip(zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format)
+        thumb_name = os.path.basename(picture_path) + "." + self.thumb_format.lower()
+        cached_img = load_image_from_zip(zip_path, thumb_name)
+        if cached_img:
+            return cached_img
+        img = self.make_picture_thumb(picture_path)
+        save_image_to_zip(zip_path, thumb_name, img, self.thumb_format)
+        return img    
 
+    
     def rgb_to_hex(self, r, g, b):
         return f"#{r:02x}{g:02x}{b:02x}"
 
@@ -546,30 +651,13 @@ class Slideshow:
         return [os.path.join(self.directory, f) for f in sorted_files]
     
 
-    def get_cached_or_generate_video_thumb(self, video_path):
-        if not self.qcache or not self.cache_dir:
-            return self.make_video_thumb(video_path)
-        ext = self.thumb_format.lower()
-        thumb_file = os.path.join(self.cache_dir, os.path.basename(video_path) + f".{ext}")
-        if not (os.path.isfile(thumb_file)):
-            img = self.make_video_thumb(video_path)
-            
-        if os.path.isfile(thumb_file):
-            try:
-                return Image.open(thumb_file)
-            except:
-                pass
-        #img = self.make_video_thumb(video_path)
-        try:
-            if self.thumb_format in ["HEIF", "AVIF"]:
-                img.save(thumb_file, format=self.thumb_format, quality=90)
-            elif self.thumb_format in ["JPG", "JPEG"]:
-                img.save(thumb_file, format="JPEG")
-            else:
-                img.save(thumb_file, format="PNG")
-        except:
-            pass
-        return img
+    def make_picture_thumb(self, picture_path):
+        img = Image.open(picture_path)
+        Lh = self.thumbSizeCache
+        ratio = Lh / img.height        
+        w, h = int(img.width * ratio), Lh
+        img = img.resize((w, h), Image.LANCZOS)
+        return (img)
 
     def make_video_thumb(self, video_path):
         if self.mode == 0:
@@ -822,7 +910,7 @@ class Slideshow:
                     self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_pdf_page_count(file_path)} Pg | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
 
                 else:
-                    img = Image.open(file_path)
+                    img = self.get_cached_or_generate_picture_thumb(file_path)
                     ratio = min(Iw / img.width, Ih / img.height)
                     w, h = int(img.width * ratio), int(img.height * ratio)
                     img = img.resize((w, h), Image.LANCZOS)
@@ -920,11 +1008,20 @@ if __name__ == "__main__":
     parser.add_argument('--QCache', type=int, default=0, help='Enable video thumbnail cache')
     parser.add_argument('--QModeSoftwareView', type=int, default=1, help='Enable ModeSoftwareView')
     
+    parser.add_argument('--ThumbSizeCache', type=int, default=540, help='ThumbSizeCache')
+    
     parser.add_argument('--ThumbFormat', type=str, choices=["JPG", "PNG", "HEIF", "AVIF"], default="PNG",
                        help="Format for saved thumbnails (JPG, PNG, HEIF, AVIF)")
     parser.add_argument('--SortFiles', type=str, choices=["NAME", "DATE"], default="NAME",
                        help="Sort by NAME or DATE")
     args = parser.parse_args()
     root = tk.Tk()
-    slideshow = Slideshow(root, args.Path, args.Cols, args.Rows, args.Mode, args.Workers, args.QCache,args.ThumbFormat,args.SortFiles,args.QModeSoftwareView)
+    slideshow = Slideshow(root, args.Path, 
+                          args.Cols, args.Rows, 
+                          args.Mode, args.Workers, 
+                          args.QCache, 
+                          args.ThumbFormat, 
+                          args.ThumbSizeCache, 
+                          args.SortFiles, 
+                          args.QModeSoftwareView)
     root.mainloop()
