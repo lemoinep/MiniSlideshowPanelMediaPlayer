@@ -14,7 +14,7 @@ import math
 import numpy as np
 from mutagen.mp3 import MP3
 from mutagen.wave import WAVE
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import fitz
 import json
 from PIL import Image  
@@ -23,6 +23,9 @@ import pillow_avif
 from pathlib import Path 
 from zipfile import ZipFile, ZIP_DEFLATED, is_zipfile
 from io import BytesIO
+from tqdm import tqdm
+import shutil
+import zipfile
 
 register_heif_opener()  # Register HEIF support
 
@@ -219,13 +222,16 @@ def CV_CLAHE(img, clipLimit=2.0, tileGridSize=(8,8)):
     return cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
 
 
-def CV_SaliencyAddWeighted(img, alpha=0.6, beta=0.4, gamma=0):
+def CV_SaliencyAddWeighted(img, alpha=0.6, beta=0.4, gamma=0, num_palette=1):
     saliency = cv2.saliency.StaticSaliencySpectralResidual_create()
     success, saliencyMap = saliency.computeSaliency(img)
     if not success:
         return img
     saliencyMap = (saliencyMap * 255).astype(np.uint8)
-    saliencyMap_color = cv2.cvtColor(saliencyMap, cv2.COLOR_GRAY2BGR)
+    if num_palette==1 :
+        saliencyMap_color = cv2.applyColorMap(saliencyMap, cv2.COLORMAP_HOT)
+    else :
+        saliencyMap_color = cv2.cvtColor(saliencyMap, cv2.COLOR_GRAY2BGR)
     return cv2.addWeighted(img, alpha, saliencyMap_color, beta, gamma)
 
 
@@ -544,6 +550,195 @@ def play_video_with_seek_and_pause(video_path):
     cv2.destroyAllWindows()
 
 
+#------------------------------------------------------------------------------
+
+def sub_is_frame_black(frame, threshold=10):
+    return frame.mean() < threshold
+
+
+def sub_get_first_non_black_frame(video_path, max_frames_to_check=30):
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return Image.new("RGB", (320, 240), color="black")
+    frame_number = 0
+    while frame_number < max_frames_to_check:
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            break
+        if not sub_is_frame_black(frame, 50):
+            cap.release()
+            return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        frame_number += 1
+    cap.release()
+    return Image.new("RGB", (320, 240), color="black")
+
+def sub_get_non_black_frames_composed(video_path, num_frames=4):
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return Image.new("RGB", (320, 240), color="black")
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    step = max(total_frames / (num_frames + 1), 1)
+    frames_collected = []
+    ret, frame = cap.read()
+    if not ret:
+        cap.release()
+        return Image.new("RGB", (320, 240), color="black")
+    img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    w0, h0 = img.size
+    frame_idx = 0
+    while len(frames_collected) < num_frames and frame_idx < total_frames:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_idx))
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if not sub_is_frame_black(frame):
+            frames_collected.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+        frame_idx += step
+    cap.release()
+    while len(frames_collected) < num_frames:
+        frames_collected.append(frames_collected[-1].copy() if frames_collected else Image.new("RGB", (320, 240), "black"))
+    size = (w0, h0)
+    frames_resized = [img.resize(size) for img in frames_collected]
+    grid_size = int(math.sqrt(num_frames))
+    composed_img = Image.new("RGB", (size[0]*grid_size, size[1]*grid_size))
+    positions = [(x*size[0], y*size[1]) for y in range(grid_size) for x in range(grid_size)]
+    for pos, img in zip(positions, frames_resized):
+        composed_img.paste(img, pos)
+    # resize thumb    
+    h1 = 540
+    ratio = h1 / h0
+    composed_img = composed_img.resize((int(w0 * ratio), int(h0 * ratio)), Image.LANCZOS)
+    return composed_img
+
+def sub_convert_and_resize_image(img_path, output_dir, format, quality=90, height=None):
+    try:
+        img = Image.open(img_path)
+        if height is not None:
+            wpercent = (height / float(img.size[1]))
+            width = int(float(img.size[0]) * wpercent)
+            img = img.resize((width, height),Image.LANCZOS)
+        base_name = os.path.splitext(os.path.basename(img_path))[0]
+        lastExt = os.path.splitext(os.path.basename(img_path))[1]
+        output_path = os.path.join(output_dir, f"{base_name}{lastExt}.{format.lower()}")
+        if format == "HEIF":
+            img.save(output_path, format="HEIF", quality=quality)
+        elif format == "AVIF":
+            img.save(output_path, format="AVIF", quality=quality)
+        else:
+            raise ValueError("Unsupported format")
+        return output_path
+    except Exception as e:
+        return f"Error for {img_path}: {e}"
+
+
+def sub_process_files_old(name_file_zip, directory, format, workers, quality=90, height=None, process_videos=False, mode=2):
+    output_dir = os.path.join(directory, 'TMP')
+    os.makedirs(output_dir, exist_ok=True)
+
+    jpg_files = [os.path.join(directory, f) for f in os.listdir(directory) if f.lower().endswith(IMAGE_EXTENSIONS)]
+    results = []
+
+    # Traitement des images en parallèle
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(sub_convert_and_resize_image, f, output_dir, format, quality, height) for f in jpg_files]
+        for future in tqdm(futures, total=len(futures), desc=f"Picture thumbnail processing into {format}"):
+            results.append(future.result())
+
+    video_thumbs = []
+    if process_videos:
+        video_files = [os.path.join(directory, f) for f in os.listdir(directory)
+            if f.lower().endswith(VIDEO_EXTENSIONS)]
+        for video_file in tqdm(video_files, desc="Video thumbnail processing"):
+            
+            if mode == 2:
+                thumb_img = sub_get_non_black_frames_composed(video_file, 4)
+            elif mode == 3:
+                thumb_img = sub_get_non_black_frames_composed(video_file, 9)
+            else:
+                thumb_img = sub_get_first_non_black_frame(video_file, 120)
+            
+            
+            base_name = os.path.splitext(os.path.basename(video_file))[0]
+            lastExt = os.path.splitext(os.path.basename(video_file))[1]
+            thumb_ext = format.lower()
+            #thumb_path = os.path.join(output_dir, f"{base_name}_thumb.{thumb_ext}")
+            thumb_path = os.path.join(output_dir, f"{base_name}{lastExt}.{format.lower()}")
+            
+            if format == "HEIF":
+                thumb_img.save(thumb_path, format="HEIF", quality=quality)
+            elif format == "AVIF":
+                thumb_img.save(thumb_path, format="AVIF", quality=quality)
+            else:
+                thumb_img.save(thumb_path, format="JPEG", quality=quality)
+            video_thumbs.append(thumb_path)
+
+    # Création du ZIP
+    zip_path = os.path.join(directory, name_file_zip)
+    with zipfile.ZipFile(zip_path, 'w') as zipf:
+        for file_path in results + video_thumbs:
+            if not file_path.startswith("Erreur"):
+                zipf.write(file_path, os.path.basename(file_path))
+    shutil.rmtree(output_dir)
+    return results + video_thumbs, zip_path
+
+
+def sub_process_files(name_file_zip, directory, format, workers, quality=90, height=None, process_videos=False, mode=2):
+    output_dir = os.path.join(directory, 'TMP')
+    os.makedirs(output_dir, exist_ok=True)
+
+    jpg_files = [os.path.join(directory, f) for f in os.listdir(directory) if f.lower().endswith(IMAGE_EXTENSIONS)]
+    results = []
+
+    # Traitement des images en parallèle
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(sub_convert_and_resize_image, f, output_dir, format, quality, height) for f in jpg_files]
+        for future in tqdm(futures, total=len(futures), desc=f"Picture thumbnail processing into {format}"):
+            results.append(future.result())
+
+    video_thumbs = []
+    if process_videos:
+        video_files = [os.path.join(directory, f) for f in os.listdir(directory) if f.lower().endswith(VIDEO_EXTENSIONS)]
+
+        def process_single_video(video_file):
+            if mode == 2:
+                thumb_img = sub_get_non_black_frames_composed(video_file, 4)
+            elif mode == 3:
+                thumb_img = sub_get_non_black_frames_composed(video_file, 9)
+            else:
+                thumb_img = sub_get_first_non_black_frame(video_file, 120)
+
+            base_name = os.path.splitext(os.path.basename(video_file))[0]
+            lastExt = os.path.splitext(os.path.basename(video_file))[1]
+            thumb_path = os.path.join(output_dir, f"{base_name}{lastExt}.{format.lower()}")
+
+            # Enregistrement de la miniature selon le format
+            if format == "HEIF":
+                thumb_img.save(thumb_path, format="HEIF", quality=quality)
+            elif format == "AVIF":
+                thumb_img.save(thumb_path, format="AVIF", quality=quality)
+            else:
+                thumb_img.save(thumb_path, format="JPEG", quality=quality)
+
+            return thumb_path
+
+        # Traitement des vidéos en parallèle
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(process_single_video, vf) for vf in video_files]
+            for future in tqdm(futures, total=len(futures), desc="Video thumbnail processing"):
+                video_thumbs.append(future.result())
+
+    # Création du ZIP
+    zip_path = os.path.join(directory, name_file_zip)
+    with zipfile.ZipFile(zip_path, 'w') as zipf:
+        for file_path in results + video_thumbs:
+            if not file_path.startswith("Erreur"):
+                zipf.write(file_path, os.path.basename(file_path))
+    shutil.rmtree(output_dir)
+    return results + video_thumbs, zip_path
+
+
+#------------------------------------------------------------------------------
+
 class Slideshow:
     def __init__(self, master, directory, panel_cols, panel_rows, mode, workers, qcache=False,thumb_format="PNG", thumbSizeCache=540, SortFiles="NAME", qModeSoftwareView=True):
         self.master = master
@@ -567,7 +762,12 @@ class Slideshow:
             
         self.cache_zip_path = None
         if self.qcache:
-            self.init_video_cache_zip()
+            fileZipCache = os.path.join(self.directory, "cache_thumbs.zip")
+            if os.path.isfile(fileZipCache):
+                self.init_video_cache_zip1()
+            else :
+                self.init_video_cache_zip2()
+                self.init_video_cache_zip1()
         
         self.setup_ui()
         self.update_clock()
@@ -579,25 +779,37 @@ class Slideshow:
         self.master.bind("m", self.mode_soft_app_key)
 
 
-    def init_video_cache_zip(self):
+    def init_video_cache_zip1(self):
         for file_path in self.images:
             if file_path.lower().endswith(VIDEO_EXTENSIONS+IMAGE_EXTENSIONS):
                 self.cache_zip_path = get_cache_zip_path(file_path)
                 break
-        if self.cache_zip_path:
-            if has_cache_config_changed_zip(self.cache_zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format):
-                if os.path.isfile(self.cache_zip_path):
-                    os.remove(self.cache_zip_path)
-                save_cache_config_to_zip(self.cache_zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format)
+        #if self.cache_zip_path:
+        #    if has_cache_config_changed_zip(self.cache_zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format):
+        #        if os.path.isfile(self.cache_zip_path):
+        #            os.remove(self.cache_zip_path)
+        #        save_cache_config_to_zip(self.cache_zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format)
+
+    def init_video_cache_zip2(self):        
+        sub_process_files(  
+            "cache_thumbs.zip",
+            self.directory,
+            self.thumb_format,
+            self.workers,
+            90,
+            self.thumbSizeCache,
+            True,
+            self.mode)
+  
 
     def get_cached_or_generate_video_thumb(self, video_path):
         if not self.qcache:
             return self.make_video_thumb(video_path)
         zip_path = get_cache_zip_path(video_path)
-        if has_cache_config_changed_zip(zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format):
-            if os.path.isfile(zip_path):
-                os.remove(zip_path)
-            save_cache_config_to_zip(zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format)
+        #if has_cache_config_changed_zip(zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format):
+        #    if os.path.isfile(zip_path):
+        #        os.remove(zip_path)
+        #    save_cache_config_to_zip(zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format)
         thumb_name = os.path.basename(video_path) + "." + self.thumb_format.lower()
         cached_img = load_image_from_zip(zip_path, thumb_name)
         if cached_img:
@@ -611,10 +823,10 @@ class Slideshow:
         if not self.qcache:
             return self.make_picture_thumb(picture_path)
         zip_path = get_cache_zip_path(picture_path)
-        if has_cache_config_changed_zip(zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format):
-            if os.path.isfile(zip_path):
-                os.remove(zip_path)
-            save_cache_config_to_zip(zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format)
+        #if has_cache_config_changed_zip(zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format):
+        #    if os.path.isfile(zip_path):
+        #        os.remove(zip_path)
+        #    save_cache_config_to_zip(zip_path, self.panel_cols, self.panel_rows, self.mode, self.thumb_format)
         thumb_name = os.path.basename(picture_path) + "." + self.thumb_format.lower()
         cached_img = load_image_from_zip(zip_path, thumb_name)
         if cached_img:
