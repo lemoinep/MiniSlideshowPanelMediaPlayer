@@ -235,6 +235,32 @@ def CV_SaliencyAddWeighted(img, alpha=0.6, beta=0.4, gamma=0, num_palette=1):
     return cv2.addWeighted(img, alpha, saliencyMap_color, beta, gamma)
 
 
+def CV_Grayscale(img):
+    gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    return gray_img
+
+def CV_Entropy(img, block_size=(32, 32)):
+    gray_img= CV_Grayscale(img)
+    h, w = gray_img.shape
+    bh, bw = block_size
+    n_blocks_y = h // bh
+    n_blocks_x = w // bw
+    entrop_map = np.zeros((n_blocks_y, n_blocks_x), dtype=np.float32)
+
+    for y in range(n_blocks_y):
+        for x in range(n_blocks_x):
+            block = gray_img[y*bh:(y+1)*bh, x*bw:(x+1)*bw]
+            hist, _ = np.histogram(block, bins=256, range=(0,256), density=True)
+            hist = hist + 1e-7  # pour éviter log(0)
+            entrop_map[y, x] = -np.sum(hist * np.log2(hist))
+
+    entrop_map_norm = cv2.normalize(entrop_map, None, 0, 255, cv2.NORM_MINMAX)
+    entrop_map_norm = entrop_map_norm.astype(np.uint8)
+    entrop_img = cv2.resize(entrop_map_norm, (w, h), interpolation=cv2.INTER_NEAREST)
+    
+    return entrop_img
+
+
 def view_picture_zoom(image_path):
  
     if image_path.lower().endswith(('.avif','.heif')):
@@ -255,6 +281,7 @@ def view_picture_zoom(image_path):
     qClache   = False
     qBrightnessContrast = False
     qAdaptativeContrast = False
+    qEntropy = False
     
     def mouse_callback(event, x, y, flags, param):
         nonlocal zoom_scale, mouse_x, mouse_y, qLoop 
@@ -327,6 +354,8 @@ def view_picture_zoom(image_path):
             zoomed_img = CV_AdaptativeContrast(zoomed_img)
         if qSaliency :
             zoomed_img = CV_SaliencyAddWeighted(zoomed_img)
+        if qEntropy:
+            zoomed_img = CV_Entropy(zoomed_img)
             
         
         
@@ -344,22 +373,15 @@ def view_picture_zoom(image_path):
             outputName = f"{outputName}_{date_time}.jpg"
             outputName = Path(new_path) / outputName
             cv2.imwrite(outputName, zoomed_img)
-        elif key == ord('x'):  
-            qSharpen = not qSharpen
-        elif key == ord('e'):  
-            qEnhanceColor = not qEnhanceColor
-        elif key == ord('v'):  
-            qVibrance = not qVibrance
-        elif key == ord('a'):  
-            qSaliency = not qSaliency
-        elif key == ord('h'):   
-            qClache = not qClache
-        elif key == ord('b'): 
-            qBrightnessContrast = not qBrightnessContrast
-        elif key == ord('c'):   
-            qAdaptativeContrast = not qAdaptativeContrast
-        elif key == ord('.'):  
-            zoom_scale = 1.0
+        elif key == ord('x'): qSharpen = not qSharpen
+        elif key == ord('e'): qEnhanceColor = not qEnhanceColor
+        elif key == ord('v'): qVibrance = not qVibrance
+        elif key == ord('a'): qSaliency = not qSaliency
+        elif key == ord('h'): qClache = not qClache
+        elif key == ord('b'): qBrightnessContrast = not qBrightnessContrast
+        elif key == ord('c'): qAdaptativeContrast = not qAdaptativeContrast
+        elif key == ord('t'): qEntropy = not qEntropy
+        elif key == ord('.'): zoom_scale = 1.0
     cv2.destroyAllWindows()
     
 
@@ -378,6 +400,7 @@ def play_video_with_seek_and_pause(video_path):
     qClache   = False
     qBrightnessContrast = False
     qAdaptativeContrast = False
+    qEntropy = False
     
     def draw_line_on_image(num_frame, nb_frames,img):
         height, width = img.shape[:2]
@@ -444,6 +467,7 @@ def play_video_with_seek_and_pause(video_path):
     if fps == 0:
         fps = 30 
 
+    fps_movie = fps
     paused = False
     current_frame = 0
 
@@ -499,6 +523,9 @@ def play_video_with_seek_and_pause(video_path):
         if qSaliency :
             zoomed_img = CV_SaliencyAddWeighted(zoomed_img)
             
+        if qEntropy:
+            zoomed_img = CV_Entropy(zoomed_img)
+            
         if qDrawLineOnImage :
             zoomed_img=draw_line_on_image(current_frame, frame_count, zoomed_img)
             
@@ -508,14 +535,13 @@ def play_video_with_seek_and_pause(video_path):
         key = cv2.waitKey(int(1000 / fps)) & 0xFF
         if key == 27:  
             break
-        elif key == ord(' '): 
-            paused = not paused
-        elif key == ord('+'):
-            current_frame = current_frame + 1
-        elif key == ord('-'):
-            current_frame = current_frame - 1
-        elif key == ord('-'):
-            current_frame = current_frame - 1
+        elif key == ord(' '): paused = not paused
+        elif key == ord('1'): fps = fps * 2
+        elif key == ord('2'): fps = fps_movie
+        elif key == ord('3'): fps = max ( 1, fps // 2)
+        elif key == ord('+'): current_frame = current_frame + 1
+        elif key == ord('-'): current_frame = current_frame - 1
+        elif key == ord('-'): current_frame = current_frame - 1
         elif key == ord('s'):
             path = Path(video_path).parent
             new_path = path / "Screenshot"
@@ -525,26 +551,17 @@ def play_video_with_seek_and_pause(video_path):
             outputName = f"{outputName}_{date_time}.jpg"
             outputName = Path(new_path) / outputName
             cv2.imwrite(outputName, zoomed_img)
-        elif key == ord('x'):  
-            qSharpen = not qSharpen
-        elif key == ord('e'):  
-            qEnhanceColor = not qEnhanceColor
-        elif key == ord('v'):  
-            qVibrance = not qVibrance    
-        elif key == ord('l'):  
-            qLoopVideo = not qLoopVideo 
-        elif key == ord('L'):  
-            qDrawLineOnImage = not qDrawLineOnImage 
-        elif key == ord('a'):  
-            qSaliency = not qSaliency
-        elif key == ord('h'):   
-            qClache = not qClache
-        elif key == ord('b'): 
-            qBrightnessContrast = not qBrightnessContrast
-        elif key == ord('c'):   
-            qAdaptativeContrast = not qAdaptativeContrast
-        elif key == ord('.'):  
-            zoom_scale = 1.0
+        elif key == ord('x'): qSharpen = not qSharpen
+        elif key == ord('e'): qEnhanceColor = not qEnhanceColor
+        elif key == ord('v'): qVibrance = not qVibrance    
+        elif key == ord('l'): qLoopVideo = not qLoopVideo 
+        elif key == ord('L'): qDrawLineOnImage = not qDrawLineOnImage 
+        elif key == ord('a'): qSaliency = not qSaliency
+        elif key == ord('h'): qClache = not qClache
+        elif key == ord('b'): qBrightnessContrast = not qBrightnessContrast
+        elif key == ord('c'): qAdaptativeContrast = not qAdaptativeContrast
+        elif key == ord('t'): qEntropy = not qEntropy
+        elif key == ord('.'): zoom_scale = 1.0
             
     cap.release()
     cv2.destroyAllWindows()
