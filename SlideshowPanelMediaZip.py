@@ -260,6 +260,40 @@ def CV_Entropy(img, block_size=(32, 32)):
     
     return entrop_img
 
+def CV_Stereo_Anaglyph(img_stereo, parallax_offset=0, lim_ratio=2.5):
+    height, width, _ = img_stereo.shape
+
+    ratio = width / height
+    if ratio > lim_ratio:
+        img_left = img_stereo[:, :width//2, :]
+        img_right = img_stereo[:, width//2:, :]
+    else:
+        img_left = img_stereo
+        img_right = img_stereo
+
+    img_left_gray = cv2.cvtColor(img_left, cv2.COLOR_BGR2GRAY)
+    img_right_gray = cv2.cvtColor(img_right, cv2.COLOR_BGR2GRAY)
+
+    if parallax_offset != 0:
+        M = np.float32([[1, 0, parallax_offset], [0, 1, 0]])
+        img_right_gray = cv2.warpAffine(
+            img_right_gray,
+            M,
+            (img_right_gray.shape[1], img_right_gray.shape[0]),
+            borderMode=cv2.BORDER_REPLICATE
+        )
+
+    min_height = min(img_left_gray.shape[0], img_right_gray.shape[0])
+    min_width = min(img_left_gray.shape[1], img_right_gray.shape[1])
+    img_left_gray = img_left_gray[:min_height, :min_width]
+    img_right_gray = img_right_gray[:min_height, :min_width]
+
+    anaglyph = np.zeros((min_height, min_width, 3), dtype=img_left.dtype)
+    anaglyph[..., 0] = img_right_gray  # Blue
+    anaglyph[..., 1] = img_right_gray  # Green
+    anaglyph[..., 2] = img_left_gray   # Red
+    
+    return anaglyph
 
 def view_picture_zoom(image_path):
  
@@ -536,9 +570,10 @@ def play_video_with_seek_and_pause(video_path):
         if key == 27:  
             break
         elif key == ord(' '): paused = not paused
-        elif key == ord('1'): fps = fps * 2
         elif key == ord('2'): fps = fps_movie
-        elif key == ord('3'): fps = max ( 1, fps // 2)
+        elif key == ord('1'): fps = max ( 1, fps // 2)
+        elif key == ord('2'): fps = fps_movie
+        elif key == ord('3'): fps = fps * 2
         elif key == ord('+'): current_frame = current_frame + 1
         elif key == ord('-'): current_frame = current_frame - 1
         elif key == ord('-'): current_frame = current_frame - 1
@@ -709,7 +744,7 @@ def sub_process_files(name_file_zip, directory, format, workers, quality=90, hei
     # Traitement des images en parallèle
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = [executor.submit(sub_convert_and_resize_image, f, output_dir, format, quality, height) for f in jpg_files]
-        for future in tqdm(futures, total=len(futures), desc=f"Picture thumbnail processing into {format}"):
+        for future in tqdm(futures, total=len(futures), desc=f"Picture thumbnail processing"):
             results.append(future.result())
 
     video_thumbs = []
