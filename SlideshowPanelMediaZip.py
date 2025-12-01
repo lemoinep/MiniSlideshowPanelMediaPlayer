@@ -260,7 +260,30 @@ def CV_Entropy(img, block_size=(32, 32)):
     
     return entrop_img
 
-def CV_Stereo_Anaglyph(img_stereo, parallax_offset=0, lim_ratio=2.5):
+
+def is_stereo_image(img_stereo, similarity_threshold=0.8):
+    img = cv2.cvtColor(img_stereo, cv2.COLOR_BGR2GRAY)
+    
+    if img is None:
+        raise ValueError("Image not found or unsupported file format")
+
+    height, width = img.shape
+    # La largeur doit être paire pour pouvoir couper en deux
+    if width % 2 != 0:
+        raise ValueError("The image width must be even")
+
+    left_img = img[:, :width//2]
+    right_img = img[:, width//2:]
+
+    left_norm = (left_img - np.mean(left_img)) / (np.std(left_img) + 1e-10)
+    right_norm = (right_img - np.mean(right_img)) / (np.std(right_img) + 1e-10)
+
+    correlation = np.mean(left_norm * right_norm)
+
+    return correlation > similarity_threshold
+
+
+def CV_Stereo_Anaglyph_Gray(img_stereo, parallax_offset=0, lim_ratio=2.0):
     height, width, _ = img_stereo.shape
 
     ratio = width / height
@@ -270,7 +293,7 @@ def CV_Stereo_Anaglyph(img_stereo, parallax_offset=0, lim_ratio=2.5):
     else:
         img_left = img_stereo
         img_right = img_stereo
-
+        
     img_left_gray = cv2.cvtColor(img_left, cv2.COLOR_BGR2GRAY)
     img_right_gray = cv2.cvtColor(img_right, cv2.COLOR_BGR2GRAY)
 
@@ -295,18 +318,60 @@ def CV_Stereo_Anaglyph(img_stereo, parallax_offset=0, lim_ratio=2.5):
     
     return anaglyph
 
+
+def CV_Stereo_Anaglyph_Color(img_stereo, parallax_offset=0):
+    height, width, _ = img_stereo.shape
+
+    ratio = width / height
+
+    if is_stereo_image(img_stereo):
+        img_left = img_stereo[:, :width//2, :]
+        img_right = img_stereo[:, width//2:, :]
+    else:
+        img_left = img_stereo
+        img_right = img_stereo
+        
+    if parallax_offset != 0:
+        M = np.float32([[1, 0, parallax_offset], [0, 1, 0]])
+        img_right = cv2.warpAffine(
+            img_right,
+            M,
+            (img_right.shape[1], img_right.shape[0]),
+            borderMode=cv2.BORDER_REPLICATE
+        )
+
+    min_height = min(img_left.shape[0], img_right.shape[0])
+    min_width = min(img_left.shape[1], img_right.shape[1])
+    img_left = img_left[:min_height, :min_width]
+    img_right = img_right[:min_height, :min_width]
+
+    anaglyph = np.zeros((min_height, min_width, 3), dtype=img_stereo.dtype)
+    anaglyph[:, :, 0] = img_right[:,:,0]   # Blue
+    #anaglyph[:, :, 1] = img_left[:,:,1]    # Green
+    anaglyph[:, :, 1] = img_right[:,:,1]    # Green
+    anaglyph[:, :, 2] = img_left[:,:,2]    # Red
+    
+    return anaglyph
+
+
+
+
+
 def view_picture_zoom(image_path):
  
     if image_path.lower().endswith(('.avif','.heif')):
-        img=cv_load_image_avif(image_path)
+        img = cv_load_image_avif(image_path)
     else:    
         img = cv2.imread(image_path)
-              
+    
+    
     zoom_scale = 1.0
     zoom_min = 1.0
     zoom_max = 15.0
     mouse_x, mouse_y = -1, -1
     height, width = img.shape[:2]
+    parallax_offset = -8
+    lim_ratio_anaglyph = 2.0
     qLoop = True
     qSharpen = False
     qEnhanceColor = False
@@ -316,12 +381,14 @@ def view_picture_zoom(image_path):
     qBrightnessContrast = False
     qAdaptativeContrast = False
     qEntropy = False
+    qAnaglyph = False
+    levelAnaglyph = 0
     
     def mouse_callback(event, x, y, flags, param):
         nonlocal zoom_scale, mouse_x, mouse_y, qLoop 
         mouse_x, mouse_y = x, y
         if event == cv2.EVENT_MOUSEWHEEL:
-            if flags > 0:
+            if flags < 0:
                 zoom_scale = min(zoom_scale + 0.1, zoom_max)
             else:
                 zoom_scale = max(zoom_scale - 0.1, zoom_min)
@@ -357,6 +424,16 @@ def view_picture_zoom(image_path):
     window_name = 'Picture Zoom'
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     ratio = width / height
+    
+    #if ratio > lim_ratio_anaglyph:
+    if is_stereo_image(img):
+        qAnaglyph = True
+        width = width // 2
+        ratio = width / height
+        levelAnaglyph = 1
+        parallax_offset = 0
+        
+    
     lh = 900
     lw = int(lh * ratio)
     cv2.resizeWindow(window_name, lw, lh)
@@ -372,8 +449,13 @@ def view_picture_zoom(image_path):
     while qLoop:
         if mouse_x == -1 and mouse_y == -1:
             mouse_x, mouse_y = width // 2, height // 2
-
-        zoomed_img = get_zoomed_image(img, zoom_scale, mouse_x, mouse_y)
+                      
+        if qAnaglyph and levelAnaglyph==1:
+            img2 = CV_Stereo_Anaglyph_Color(img, parallax_offset)
+            zoomed_img = get_zoomed_image(img2, zoom_scale, mouse_x, mouse_y)
+        else:
+            zoomed_img = get_zoomed_image(img, zoom_scale, mouse_x, mouse_y)
+        
         if qClache  :
             zoomed_img = CV_CLAHE(zoomed_img)
         if qSharpen :
@@ -391,8 +473,10 @@ def view_picture_zoom(image_path):
         if qEntropy:
             zoomed_img = CV_Entropy(zoomed_img)
             
-        
-        
+        if qAnaglyph and levelAnaglyph==0:
+            zoomed_img = CV_Stereo_Anaglyph_Color(zoomed_img, parallax_offset)
+            
+
         cv2.imshow(window_name, zoomed_img)
 
         key = cv2.waitKey(20) & 0xFF
@@ -416,6 +500,11 @@ def view_picture_zoom(image_path):
         elif key == ord('c'): qAdaptativeContrast = not qAdaptativeContrast
         elif key == ord('t'): qEntropy = not qEntropy
         elif key == ord('.'): zoom_scale = 1.0
+        
+        elif key == ord('n'): qAnaglyph = not qAnaglyph
+        elif key == ord('4'): parallax_offset = parallax_offset - 1
+        elif key == ord('6'): parallax_offset = parallax_offset + 1
+        
     cv2.destroyAllWindows()
     
 
@@ -424,6 +513,8 @@ def play_video_with_seek_and_pause(video_path):
     zoom_min = 1.0
     zoom_max = 15.0
     mouse_x, mouse_y = -1, -1
+    parallax_offset = -8
+    lim_ratio_anaglyph = 2.0
     qLoop = True
     qSharpen = False
     qEnhanceColor = False
@@ -435,6 +526,8 @@ def play_video_with_seek_and_pause(video_path):
     qBrightnessContrast = False
     qAdaptativeContrast = False
     qEntropy = False
+    qAnaglyph = False
+    levelAnaglyph = 0
     
     def draw_line_on_image(num_frame, nb_frames,img):
         height, width = img.shape[:2]
@@ -446,23 +539,40 @@ def play_video_with_seek_and_pause(video_path):
         cv2.line(image_with_line,(0, height-10), (x, height-10),(0, 0, 255), 3)
         return image_with_line
     
+    
+    def mouse_click_inside(x, y, x1, y1, x2, y2):
+        return x1 <= x <= x2 and y1 <= y <= y2
+
+    
     def mouse_callback(event, x, y, flags, param):
         nonlocal zoom_scale, mouse_x, mouse_y, current_frame, paused, qLoop
         mouse_x, mouse_y = x, y
+                
         if event == cv2.EVENT_MOUSEWHEEL:
-            if flags > 0:
+            if flags < 0:
                 zoom_scale = min(zoom_scale + 0.1, zoom_max)
             else:
                 zoom_scale = max(zoom_scale - 0.1, zoom_min)
+                
         elif event == cv2.EVENT_LBUTTONDOWN:
-            clicked_frame = int((x / width) * frame_count)
-            clicked_frame = max(0, min(clicked_frame, frame_count - 1))
-            current_frame = clicked_frame
-            cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
-            paused = False
+            #clicked_frame = int((x / width) * frame_count)
+            #clicked_frame = max(0, min(clicked_frame, frame_count - 1))
+            #current_frame = clicked_frame
+            #cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+            #paused = False
+            
+            if mouse_click_inside(mouse_x, mouse_y, 0, 0,  width, int(0.1 *height)):
+                paused = not paused 
+            else :
+                clicked_frame = int((x / width) * frame_count)
+                clicked_frame = max(0, min(clicked_frame, frame_count - 1))
+                current_frame = clicked_frame
+                cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+                paused = False
             
         if event == cv2.EVENT_RBUTTONDOWN:
             qLoop = False
+            
     
     def get_zoomed_image(image, scale, center_x, center_y):
         h, w = image.shape[:2]
@@ -508,6 +618,22 @@ def play_video_with_seek_and_pause(video_path):
     window_name = 'Movie Player'
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     ratio = width / height
+    
+    #if ratio > lim_ratio_anaglyph:
+    #    qAnaglyph = True
+    #    width = width // 2
+    #    ratio = width / height
+    #    parallax_offset = 0
+        
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
+    ret, frame = cap.read()
+    if is_stereo_image(frame):
+        qAnaglyph = True
+        width = width // 2
+        atio = width / height
+        parallax_offset = 0
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
+    
     lh = 900
     lw = int(lh * ratio)
     cv2.resizeWindow(window_name, lw, lh)
@@ -541,7 +667,12 @@ def play_video_with_seek_and_pause(video_path):
             if not ret:
                 break
 
-        zoomed_img = get_zoomed_image(frame, zoom_scale, mouse_x, mouse_y)
+        if qAnaglyph and levelAnaglyph==1:
+            img2 = CV_Stereo_Anaglyph_Color(frame, parallax_offset)
+            zoomed_img = get_zoomed_image(img2, zoom_scale, mouse_x, mouse_y)
+        else:
+            zoomed_img = get_zoomed_image(frame, zoom_scale, mouse_x, mouse_y)
+                
         if qClache  :
             zoomed_img = CV_CLAHE(zoomed_img)
         if qSharpen :
@@ -560,6 +691,9 @@ def play_video_with_seek_and_pause(video_path):
         if qEntropy:
             zoomed_img = CV_Entropy(zoomed_img)
             
+        if qAnaglyph and levelAnaglyph==0:
+            zoomed_img = CV_Stereo_Anaglyph_Color(zoomed_img,parallax_offset)
+            
         if qDrawLineOnImage :
             zoomed_img=draw_line_on_image(current_frame, frame_count, zoomed_img)
             
@@ -575,7 +709,6 @@ def play_video_with_seek_and_pause(video_path):
         elif key == ord('2'): fps = fps_movie
         elif key == ord('3'): fps = fps * 2
         elif key == ord('+'): current_frame = current_frame + 1
-        elif key == ord('-'): current_frame = current_frame - 1
         elif key == ord('-'): current_frame = current_frame - 1
         elif key == ord('s'):
             path = Path(video_path).parent
@@ -596,8 +729,12 @@ def play_video_with_seek_and_pause(video_path):
         elif key == ord('b'): qBrightnessContrast = not qBrightnessContrast
         elif key == ord('c'): qAdaptativeContrast = not qAdaptativeContrast
         elif key == ord('t'): qEntropy = not qEntropy
-        elif key == ord('.'): zoom_scale = 1.0
-            
+        elif key == ord('.'): zoom_scale = 1.
+        
+        elif key == ord('n'): qAnaglyph = not qAnaglyph
+        elif key == ord('4'): parallax_offset = parallax_offset - 1
+        elif key == ord('6'): parallax_offset = parallax_offset + 1
+                    
     cap.release()
     cv2.destroyAllWindows()
 
@@ -665,6 +802,11 @@ def sub_get_non_black_frames_composed(video_path, num_frames=4):
 def sub_convert_and_resize_image(img_path, output_dir, format, quality=90, height=None):
     try:
         img = Image.open(img_path)
+        
+        #img = np.array(img)
+        #if is_stereo_image(img):
+        #    img = CV_Stereo_Anaglyph_Color(img)
+            
         if height is not None:
             wpercent = (height / float(img.size[1]))
             width = int(float(img.size[0]) * wpercent)
@@ -682,71 +824,92 @@ def sub_convert_and_resize_image(img_path, output_dir, format, quality=90, heigh
     except Exception as e:
         return f"Error for {img_path}: {e}"
 
+def sub_get_grid_preview_from_pdf(pdf_path, dpi=200, grid_size=3):
+    pdf_document = fitz.open(pdf_path)
+    page_count = pdf_document.page_count  
+    
+    if page_count < grid_size * grid_size:
+        page = pdf_document.load_page(0)
+        pix = page.get_pixmap(matrix=fitz.Matrix(dpi/72, dpi/72))
+        img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)  
+        pdf_document.close()
+        return img
+    
+    n_tiles = grid_size * grid_size  
+    
+    indices = []
+    for i in range(n_tiles):
+        t = i / (n_tiles - 1)
+        idx = int(round(t * (page_count - 1)))
+        indices.append(idx)
+    
+    page_images = []
+    for idx in indices:
+        page = pdf_document.load_page(idx)  
+        pix = page.get_pixmap(matrix=fitz.Matrix(dpi/72, dpi/72))
+        img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        page_images.append(img)
+    
+    pdf_document.close()
+    
+    tile_w, tile_h = page_images[0].size
+    page_images = [im.resize((tile_w, tile_h), Image.LANCZOS) for im in page_images]
+    
+    grid_w = tile_w * grid_size
+    grid_h = tile_h * grid_size
+    grid_img = Image.new("RGB", (grid_w, grid_h))
+    
+    for i, im in enumerate(page_images):
+        row = i // grid_size
+        col = i % grid_size
+        x = col * tile_w
+        y = row * tile_h
+        grid_img.paste(im, (x, y))
+    return grid_img
 
-def sub_process_files_old(name_file_zip, directory, format, workers, quality=90, height=None, process_videos=False, mode=2):
-    output_dir = os.path.join(directory, 'TMP')
-    os.makedirs(output_dir, exist_ok=True)
 
-    jpg_files = [os.path.join(directory, f) for f in os.listdir(directory) if f.lower().endswith(IMAGE_EXTENSIONS)]
-    results = []
-
-    # Traitement des images en parallèle
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [executor.submit(sub_convert_and_resize_image, f, output_dir, format, quality, height) for f in jpg_files]
-        for future in tqdm(futures, total=len(futures), desc=f"Picture thumbnail processing into {format}"):
-            results.append(future.result())
-
-    video_thumbs = []
-    if process_videos:
-        video_files = [os.path.join(directory, f) for f in os.listdir(directory)
-            if f.lower().endswith(VIDEO_EXTENSIONS)]
-        for video_file in tqdm(video_files, desc="Video thumbnail processing"):
-            
-            if mode == 2:
-                thumb_img = sub_get_non_black_frames_composed(video_file, 4)
-            elif mode == 3:
-                thumb_img = sub_get_non_black_frames_composed(video_file, 9)
-            else:
-                thumb_img = sub_get_first_non_black_frame(video_file, 120)
-            
-            
-            base_name = os.path.splitext(os.path.basename(video_file))[0]
-            lastExt = os.path.splitext(os.path.basename(video_file))[1]
-            thumb_ext = format.lower()
-            #thumb_path = os.path.join(output_dir, f"{base_name}_thumb.{thumb_ext}")
-            thumb_path = os.path.join(output_dir, f"{base_name}{lastExt}.{format.lower()}")
-            
-            if format == "HEIF":
-                thumb_img.save(thumb_path, format="HEIF", quality=quality)
-            elif format == "AVIF":
-                thumb_img.save(thumb_path, format="AVIF", quality=quality)
-            else:
-                thumb_img.save(thumb_path, format="JPEG", quality=quality)
-            video_thumbs.append(thumb_path)
-
-    # Création du ZIP
-    zip_path = os.path.join(directory, name_file_zip)
-    with zipfile.ZipFile(zip_path, 'w') as zipf:
-        for file_path in results + video_thumbs:
-            if not file_path.startswith("Erreur"):
-                zipf.write(file_path, os.path.basename(file_path))
-    shutil.rmtree(output_dir)
-    return results + video_thumbs, zip_path
+def sub_convert_and_resize_pdf_image(file_path, output_dir, format, quality=90, height=None):
+    try:
+        img = sub_get_grid_preview_from_pdf(file_path)
+        if height is not None:
+            wpercent = (height / float(img.size[1]))
+            width = int(float(img.size[0]) * wpercent)
+            img = img.resize((width, height),Image.LANCZOS)
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        lastExt = os.path.splitext(os.path.basename(file_path))[1]
+        output_path = os.path.join(output_dir, f"{base_name}{lastExt}.{format.lower()}")
+        if format == "HEIF":
+            img.save(output_path, format="HEIF", quality=quality)
+        elif format == "AVIF":
+            img.save(output_path, format="AVIF", quality=quality)
+        else:
+            raise ValueError("Unsupported format")
+        return output_path
+    except Exception as e:
+        return f"Error for {file_path}: {e}"
 
 
 def sub_process_files(name_file_zip, directory, format, workers, quality=90, height=None, process_videos=False, mode=2):
     output_dir = os.path.join(directory, 'TMP')
     os.makedirs(output_dir, exist_ok=True)
 
+    # PICTURES TRAITEMENT
     jpg_files = [os.path.join(directory, f) for f in os.listdir(directory) if f.lower().endswith(IMAGE_EXTENSIONS)]
     results = []
-
-    # Traitement des images en parallèle
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = [executor.submit(sub_convert_and_resize_image, f, output_dir, format, quality, height) for f in jpg_files]
         for future in tqdm(futures, total=len(futures), desc=f"Picture thumbnail processing"):
             results.append(future.result())
 
+    # PDFs TRAITEMENT
+    pdf_files = [os.path.join(directory, f) for f in os.listdir(directory) if f.lower().endswith(PDF_EXTENSIONS)]
+    pdf_thumbs = []
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(sub_convert_and_resize_pdf_image, pf, output_dir, format, quality, height) for pf in pdf_files]
+        for future in tqdm(futures, total=len(futures), desc=f"PDF thumbnail processing"):
+            pdf_thumbs.append(future.result())
+
+    # VIDEOs TRAITEMENT
     video_thumbs = []
     if process_videos:
         video_files = [os.path.join(directory, f) for f in os.listdir(directory) if f.lower().endswith(VIDEO_EXTENSIONS)]
@@ -773,20 +936,19 @@ def sub_process_files(name_file_zip, directory, format, workers, quality=90, hei
 
             return thumb_path
 
-        # Traitement des vidéos en parallèle
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = [executor.submit(process_single_video, vf) for vf in video_files]
             for future in tqdm(futures, total=len(futures), desc="Video thumbnail processing"):
                 video_thumbs.append(future.result())
 
-    # Création du ZIP
+    # BUILD ZIP
     zip_path = os.path.join(directory, name_file_zip)
     with zipfile.ZipFile(zip_path, 'w') as zipf:
-        for file_path in results + video_thumbs:
+        for file_path in results + video_thumbs + pdf_thumbs:
             if not file_path.startswith("Erreur"):
                 zipf.write(file_path, os.path.basename(file_path))
     shutil.rmtree(output_dir)
-    return results + video_thumbs, zip_path
+    return results + video_thumbs + pdf_thumbs, zip_path
 
 
 #------------------------------------------------------------------------------
@@ -833,7 +995,7 @@ class Slideshow:
 
     def init_video_cache_zip1(self):
         for file_path in self.images:
-            if file_path.lower().endswith(VIDEO_EXTENSIONS+IMAGE_EXTENSIONS):
+            if file_path.lower().endswith(VIDEO_EXTENSIONS+IMAGE_EXTENSIONS+PDF_EXTENSIONS):
                 self.cache_zip_path = get_cache_zip_path(file_path)
                 break
         #if self.cache_zip_path:
@@ -867,6 +1029,19 @@ class Slideshow:
         if cached_img:
             return cached_img
         img = self.make_video_thumb(video_path)
+        save_image_to_zip(zip_path, thumb_name, img, self.thumb_format)
+        return img
+    
+    def get_cached_or_generate_pdf_thumb(self, pdf_path):
+        if not self.qcache:
+            return self.make_pdf_thumb(pdf_path)
+        zip_path = get_cache_zip_path(pdf_path)
+
+        thumb_name = os.path.basename(pdf_path) + "." + self.thumb_format.lower()
+        cached_img = load_image_from_zip(zip_path, thumb_name)
+        if cached_img:
+            return cached_img
+        img = self.make_pdf_thumb(pdf_path)
         save_image_to_zip(zip_path, thumb_name, img, self.thumb_format)
         return img
    
@@ -936,6 +1111,15 @@ class Slideshow:
             return self.get_non_black_frames_composed_parallel(video_path, 9, self.workers)
         else:
             return self.get_first_non_black_frame(video_path, 120)
+        
+    def make_pdf_thumb(self, file_path):
+        img = self.get_grid_preview_from_pdf(file_path)
+        Lh = self.thumbSizeCache
+        ratio = Lh / img.height        
+        w, h = int(img.width * ratio), Lh
+        img = img.resize((w, h), Image.LANCZOS)
+        return (img)
+
 
     def is_frame_black(self, frame, threshold=20):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -1076,6 +1260,50 @@ class Slideshow:
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         pdf_document.close()
         return img
+    
+    
+    def get_grid_preview_from_pdf(self, pdf_path, dpi=200, grid_size=3):
+        pdf_document = fitz.open(pdf_path)
+        page_count = pdf_document.page_count  
+    
+        if page_count < grid_size * grid_size:
+            page = pdf_document.load_page(0)
+            pix = page.get_pixmap(matrix=fitz.Matrix(dpi/72, dpi/72))
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)  
+            pdf_document.close()
+            return img
+    
+        n_tiles = grid_size * grid_size  
+    
+        indices = []
+        for i in range(n_tiles):
+            t = i / (n_tiles - 1)
+            idx = int(round(t * (page_count - 1)))
+            indices.append(idx)
+    
+        page_images = []
+        for idx in indices:
+            page = pdf_document.load_page(idx)  
+            pix = page.get_pixmap(matrix=fitz.Matrix(dpi/72, dpi/72))
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            page_images.append(img)
+    
+        pdf_document.close()
+    
+        tile_w, tile_h = page_images[0].size
+        page_images = [im.resize((tile_w, tile_h), Image.LANCZOS) for im in page_images]
+    
+        grid_w = tile_w * grid_size
+        grid_h = tile_h * grid_size
+        grid_img = Image.new("RGB", (grid_w, grid_h))
+    
+        for i, im in enumerate(page_images):
+            row = i // grid_size
+            col = i % grid_size
+            x = col * tile_w
+            y = row * tile_h
+            grid_img.paste(im, (x, y))
+        return grid_img
 
     def get_pdf_page_count(self, pdf_path):
         pdf_document = fitz.open(pdf_path)
@@ -1159,7 +1387,10 @@ class Slideshow:
                     self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_audio_length(file_path):.2f} s | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
 
                 elif ext in PDF_EXTENSIONS:
-                    img = self.get_first_page_from_pdf(file_path)
+                    #img = self.get_first_page_from_pdf(file_path)
+                    #img = self.get_grid_preview_from_pdf(file_path)      
+                    img = self.get_cached_or_generate_pdf_thumb(file_path)
+                        
                     ratio = min(Iw / img.width, Ih / img.height)
                     w, h = int(img.width * ratio), int(img.height * ratio)
                     img = img.resize((w, h), Image.LANCZOS)
