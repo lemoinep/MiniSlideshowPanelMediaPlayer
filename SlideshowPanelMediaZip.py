@@ -354,8 +354,38 @@ def CV_Stereo_Anaglyph_Color(img_stereo, parallax_offset=0):
     return anaglyph
 
 
+def is_pixel_dark(img, x, y, value):
+    if x < 0 or x >= img.shape[1] or y < 0 or y >= img.shape[0]:
+        return False
+    pixel_value = img[y, x] 
+    if len(img.shape) == 3:
+        pixel_value = cv2.cvtColor(img[y:y+1, x:x+1], cv2.COLOR_BGR2GRAY)[0, 0]
+    return pixel_value < value
 
+def get_cropped_image(image):
+    h, w = image.shape[:2]
+    c_left = 0
+    c_right = w
+        
+    c_top = int (h * 0.1) 
+    c_bottom = h
+    dest = image[c_top:c_bottom, c_left:c_right]
+    return (dest)
 
+def get_cropped_movie(image):
+    h, w = image.shape[:2]
+    c_left = 0
+    c_right = w
+        
+    c_top = int (h * 0.055) 
+    c_bottom = h - int (h * 0.139)
+    
+    if math.isclose(float(h) / float(w), 2.11111, rel_tol=1e-4):
+        c_top = int (h * 0.07) 
+        c_bottom = h - int (h * 0.08)
+        
+    dest = image[c_top:c_bottom, c_left:c_right]
+    return (dest)
 
 def view_picture_zoom(image_path):
  
@@ -383,6 +413,8 @@ def view_picture_zoom(image_path):
     qEntropy = False
     qAnaglyph = False
     levelAnaglyph = 0
+    qAutoCrop = False
+
     
     def mouse_callback(event, x, y, flags, param):
         nonlocal zoom_scale, mouse_x, mouse_y, qLoop 
@@ -395,7 +427,7 @@ def view_picture_zoom(image_path):
                 
         if event == cv2.EVENT_RBUTTONDOWN:
             qLoop = False
-
+    
     def get_zoomed_image(image, scale, center_x, center_y):
         h, w = image.shape[:2]
         new_w = int(w / scale)
@@ -421,6 +453,13 @@ def view_picture_zoom(image_path):
         zoomed = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
         return zoomed
 
+    v = 50
+    qAutoCrop = is_pixel_dark(img, 3, 3, v) and is_pixel_dark(img, width-3, 3, v) and is_pixel_dark(img, width // 2, 3, v)
+
+    if qAutoCrop:
+        img = get_cropped_image(img)
+        height, width = img.shape[:2]
+                                 
     window_name = 'Picture Zoom'
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     ratio = width / height
@@ -455,7 +494,7 @@ def view_picture_zoom(image_path):
             zoomed_img = get_zoomed_image(img2, zoom_scale, mouse_x, mouse_y)
         else:
             zoomed_img = get_zoomed_image(img, zoom_scale, mouse_x, mouse_y)
-        
+
         if qClache  :
             zoomed_img = CV_CLAHE(zoomed_img)
         if qSharpen :
@@ -508,6 +547,156 @@ def view_picture_zoom(image_path):
     cv2.destroyAllWindows()
     
 
+def view_pdf_zoom(pdf_path, dpi=150):
+    doc = fitz.open(pdf_path)
+    page_count = doc.page_count
+
+    page_index = 0
+    zoom_scale = 1.0
+    zoom_min = 1.0
+    zoom_max = 15.0
+    mouse_x, mouse_y = -1, -1
+    qLoop = True
+    
+    qDrawLineOnImage = True
+
+    window_name = 'PDF Viewer'
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    
+    def draw_line_on_image(num_frame, nb_frames,img):
+        height, width = img.shape[:2]
+        ratio = num_frame / nb_frames
+        x = int(ratio * width)    
+        image_with_line = img.copy()
+        cv2.line(image_with_line,(0, height-9), (x, height-9),(0, 0, 0), 6)
+        cv2.line(image_with_line,(0, height-10), (x, height-10),(0, 0, 125), 6)
+        cv2.line(image_with_line,(0, height-10), (x, height-10),(0, 0, 255), 3)
+        return image_with_line
+
+    def render_page(index):
+        page = doc.load_page(index)
+        mat = fitz.Matrix(dpi / 72.0, dpi / 72.0)
+        pix = page.get_pixmap(matrix=mat)
+        # pixmaps PyMuPDF -> numpy RGB -> BGR pour OpenCV
+        img = np.frombuffer(pix.samples, dtype=np.uint8)
+        img = img.reshape(pix.h, pix.w, pix.n)
+        if pix.n == 4:
+            img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+        else:
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        return img
+
+    img = render_page(page_index)
+    height, width = img.shape[:2]
+
+    def get_zoomed_image(image, scale, center_x, center_y):
+        h, w = image.shape[:2]
+        new_w = int(w / scale)
+        new_h = int(h / scale)
+
+        left = max(center_x - new_w // 2, 0)
+        right = min(center_x + new_w // 2, w)
+        top = max(center_y - new_h // 2, 0)
+        bottom = min(center_y + new_h // 2, h)
+
+        if right - left < new_w:
+            if left == 0:
+                right = new_w
+            elif right == w:
+                left = w - new_w
+        if bottom - top < new_h:
+            if top == 0:
+                bottom = new_h
+            elif bottom == h:
+                top = h - new_h
+
+        cropped = image[top:bottom, left:right]
+        zoomed = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+        return zoomed
+
+    def mouse_callback(event, x, y, flags, param):
+        nonlocal zoom_scale, mouse_x, mouse_y, qLoop
+        mouse_x, mouse_y = x, y
+        if event == cv2.EVENT_MOUSEWHEEL:
+            if flags < 0:
+                zoom_scale = min(zoom_scale + 0.1, zoom_max)
+            else:
+                zoom_scale = max(zoom_scale - 0.1, zoom_min)
+        if event == cv2.EVENT_RBUTTONDOWN:
+            qLoop = False
+
+    cv2.setMouseCallback(window_name, mouse_callback)
+
+    ratio = width / height
+    lh = 900
+    lw = int(lh * ratio)
+    cv2.resizeWindow(window_name, lw, lh)
+
+    
+    screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
+    screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080  
+    
+    start_x = int((screen_width - lw) / 2)
+    start_y = int((screen_height - lh) / 2)
+    cv2.moveWindow(window_name, start_x, start_y)
+
+
+    while qLoop:
+        if mouse_x == -1 and mouse_y == -1:
+            mouse_x, mouse_y = width // 2, height // 2
+
+        zoomed_img = get_zoomed_image(img, zoom_scale, mouse_x, mouse_y)
+        if qDrawLineOnImage :
+            zoomed_img=draw_line_on_image(page_index+1, page_count, zoomed_img)
+        cv2.imshow(window_name, zoomed_img)
+
+        key = cv2.waitKey(20) & 0xFF
+        if key == 27:      # ESC
+            break
+        elif key == ord('s'):
+            path = Path(pdf_path).parent
+            new_path = path / "Screenshot"
+            new_path.mkdir(parents=True, exist_ok=True)
+            date_time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+            outputName = f"PDF_{page_index+1}_{date_time}.jpg"
+            outputName = new_path / outputName
+            cv2.imwrite(str(outputName), zoomed_img)
+        elif key == ord('.'):
+            zoom_scale = 1.0
+        elif key == ord('3') or key == ord(' '):   
+            if page_index < page_count - 1:
+                page_index += 1
+                img = render_page(page_index)
+                height, width = img.shape[:2]
+                ratio = width / height
+                lh = 900
+                lw = int(lh * ratio)
+                cv2.resizeWindow(window_name, lw, lh)
+                start_x = int((screen_width - lw) / 2)
+                start_y = int((screen_height - lh) / 2)
+                cv2.moveWindow(window_name, start_x, start_y)
+                mouse_x, mouse_y = -1, -1
+                zoom_scale = 1.0
+        elif key == ord('1'):   
+            if page_index > 0:
+                page_index -= 1
+                img = render_page(page_index)
+                height, width = img.shape[:2]
+                ratio = width / height
+                lh = 900
+                lw = int(lh * ratio)
+                cv2.resizeWindow(window_name, lw, lh)
+                start_x = int((screen_width - lw) / 2)
+                start_y = int((screen_height - lh) / 2)
+                cv2.moveWindow(window_name, start_x, start_y)
+                mouse_x, mouse_y = -1, -1
+                zoom_scale = 1.0
+        elif key == ord('L'): qDrawLineOnImage = not qDrawLineOnImage
+
+    cv2.destroyAllWindows()
+    doc.close()
+
+
 def play_video_with_seek_and_pause(video_path):
     zoom_scale = 1.0
     zoom_min = 1.0
@@ -528,6 +717,7 @@ def play_video_with_seek_and_pause(video_path):
     qEntropy = False
     qAnaglyph = False
     levelAnaglyph = 0
+    qAutoCrop = False
     
     def draw_line_on_image(num_frame, nb_frames,img):
         height, width = img.shape[:2]
@@ -625,14 +815,26 @@ def play_video_with_seek_and_pause(video_path):
     #    ratio = width / height
     #    parallax_offset = 0
         
-    cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 25)
     ret, frame = cap.read()
+    
+    qAutoCrop = is_pixel_dark(frame, 3, 3, 15) and is_pixel_dark(frame, width-3, 3, 15) and is_pixel_dark(frame, width // 2, 3, 15)
+    
+    if qAutoCrop:
+        img = get_cropped_movie(frame)
+        height, width = img.shape[:2]
+        ratio = width / height
+    
+    
     if is_stereo_image(frame):
         qAnaglyph = True
         width = width // 2
-        atio = width / height
+        ratio = width / height
         parallax_offset = 0
-        cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
+        #cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
+        
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
+    ret, frame = cap.read()
     
     lh = 900
     lw = int(lh * ratio)
@@ -666,6 +868,9 @@ def play_video_with_seek_and_pause(video_path):
             ret, frame = cap.read()
             if not ret:
                 break
+
+        if qAutoCrop:
+            frame = get_cropped_movie(frame)
 
         if qAnaglyph and levelAnaglyph==1:
             img2 = CV_Stereo_Anaglyph_Color(frame, parallax_offset)
@@ -1419,6 +1624,7 @@ class Slideshow:
                     self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
         self.slider.set(self.current_image)
 
+
     def open_with_default_player(self, video_path):
         if self.qModeSoftwareView:
             if sys.platform.startswith('darwin'):
@@ -1431,8 +1637,7 @@ class Slideshow:
             play_video_with_seek_and_pause(video_path)
             
     def open_with_default_pdf_player(self, pdf_path):
-        #if self.qModeSoftwareView:
-        if True:
+        if self.qModeSoftwareView:
             if sys.platform.startswith('darwin'):
                 subprocess.Popen(['open', pdf_path])
             elif os.name == 'nt':
@@ -1440,7 +1645,7 @@ class Slideshow:
             elif os.name == 'posix':
                 subprocess.Popen(['xdg-open', pdf_path])
         else :
-            play_video_with_seek_and_pause(pdf_path)
+            view_pdf_zoom(pdf_path)
 
     def open_with_default_image_viewer(self, image_path):
         if self.qModeSoftwareView:
