@@ -353,14 +353,21 @@ def CV_Stereo_Anaglyph_Color(img_stereo, parallax_offset=0):
     
     return anaglyph
 
-
-def is_pixel_dark(img, x, y, value):
+def is_pixel_down(img, x, y, value):
     if x < 0 or x >= img.shape[1] or y < 0 or y >= img.shape[0]:
         return False
     pixel_value = img[y, x] 
     if len(img.shape) == 3:
         pixel_value = cv2.cvtColor(img[y:y+1, x:x+1], cv2.COLOR_BGR2GRAY)[0, 0]
     return pixel_value < value
+
+def is_pixel_up(img, x, y, value):
+    if x < 0 or x >= img.shape[1] or y < 0 or y >= img.shape[0]:
+        return False
+    pixel_value = img[y, x] 
+    if len(img.shape) == 3:
+        pixel_value = cv2.cvtColor(img[y:y+1, x:x+1], cv2.COLOR_BGR2GRAY)[0, 0]
+    return pixel_value > value
 
 def get_cropped_image(image):
     h, w = image.shape[:2]
@@ -369,6 +376,31 @@ def get_cropped_image(image):
         
     c_top = int (h * 0.1) 
     c_bottom = h
+    dest = image[c_top:c_bottom, c_left:c_right]
+    return (dest)
+
+
+def num_type_zone(image):
+    h, w = image.shape[:2]
+    lm = 50
+    ly = 9
+    q1 = is_pixel_down(image, 3, ly, lm) and is_pixel_down(image, w-3, ly, lm) and is_pixel_down(image, w // 2, ly, lm)
+    lm =249
+    ly = 31
+    q2 = is_pixel_up(image, 56, ly, lm) and is_pixel_up(image, 94, ly, lm) and not is_pixel_up(image, 100, ly, lm)
+    return(q1*1+q2*2)
+    
+
+def get_cropped_image_num(image,num):
+    h, w = image.shape[:2]
+    c_left = 0
+    c_right = w
+    if (num==1):
+        c_top = int (h * 0.1) 
+        c_bottom = h
+    if (num==2):
+        c_top = 35 
+        c_bottom = h 
     dest = image[c_top:c_bottom, c_left:c_right]
     return (dest)
 
@@ -453,28 +485,33 @@ def view_picture_zoom(image_path):
         zoomed = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
         return zoomed
 
-    v = 50
-    qAutoCrop = is_pixel_dark(img, 3, 3, v) and is_pixel_dark(img, width-3, 3, v) and is_pixel_dark(img, width // 2, 3, v)
-
-    if qAutoCrop:
-        img = get_cropped_image(img)
+   
+    num_type_crop = num_type_zone(img)
+    qAutoCrop = (num_type_crop>0)
+    
+    if qAutoCrop:  
+        img = get_cropped_image_num(img, num_type_crop)
         height, width = img.shape[:2]
                                  
     window_name = 'Picture Zoom'
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
     ratio = width / height
     
-    #if ratio > lim_ratio_anaglyph:
     if is_stereo_image(img):
         qAnaglyph = True
         width = width // 2
         ratio = width / height
         levelAnaglyph = 1
         parallax_offset = 0
-        
-    
+         
     lh = 900
     lw = int(lh * ratio)
+    
+    if lw > 1920:
+        lw = 1910
+        lh = int(lw / ratio)
+        
     cv2.resizeWindow(window_name, lw, lh)
     cv2.setMouseCallback(window_name, mouse_callback)
     
@@ -562,6 +599,7 @@ def view_pdf_zoom(pdf_path, dpi=150):
 
     window_name = 'PDF Viewer'
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
     
     def draw_line_on_image(num_frame, nb_frames,img):
         height, width = img.shape[:2]
@@ -630,6 +668,12 @@ def view_pdf_zoom(pdf_path, dpi=150):
     ratio = width / height
     lh = 900
     lw = int(lh * ratio)
+    
+    if lw > 1920:
+        lw = 1910
+        lh = int(lw / ratio)
+        
+        
     cv2.resizeWindow(window_name, lw, lh)
 
     
@@ -807,6 +851,7 @@ def play_video_with_seek_and_pause(video_path):
 
     window_name = 'Movie Player'
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
     ratio = width / height
     
     #if ratio > lim_ratio_anaglyph:
@@ -818,7 +863,7 @@ def play_video_with_seek_and_pause(video_path):
     cap.set(cv2.CAP_PROP_POS_FRAMES, 25)
     ret, frame = cap.read()
     
-    qAutoCrop = is_pixel_dark(frame, 3, 3, 15) and is_pixel_dark(frame, width-3, 3, 15) and is_pixel_dark(frame, width // 2, 3, 15)
+    qAutoCrop = is_pixel_down(frame, 3, 3, 15) and is_pixel_down(frame, width-3, 3, 15) and is_pixel_down(frame, width // 2, 3, 15)
     
     if qAutoCrop:
         img = get_cropped_movie(frame)
@@ -838,6 +883,11 @@ def play_video_with_seek_and_pause(video_path):
     
     lh = 900
     lw = int(lh * ratio)
+    
+    if lw > 1920:
+        lw = 1910
+        lh = int(lw / ratio)
+    
     cv2.resizeWindow(window_name, lw, lh)
     cv2.setMouseCallback(window_name, mouse_callback)
     
