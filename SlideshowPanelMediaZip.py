@@ -383,11 +383,13 @@ def get_cropped_image(image):
 def num_type_zone(image):
     h, w = image.shape[:2]
     lm = 50
+    lx = 9
     ly = 9
-    q1 = is_pixel_down(image, 3, ly, lm) and is_pixel_down(image, w-3, ly, lm) and is_pixel_down(image, w // 2, ly, lm)
-    lm =249
+    q1 = is_pixel_down(image, lx, ly, lm) and is_pixel_down(image, w-lx, ly, lm) and is_pixel_down(image, w // 2, ly, lm)
+    lm = 240
     ly = 31
-    q2 = is_pixel_up(image, 56, ly, lm) and is_pixel_up(image, 94, ly, lm) and not is_pixel_up(image, 100, ly, lm)
+    #q2 = is_pixel_up(image, 56, ly, lm) and is_pixel_up(image, 94, ly, lm) and not is_pixel_up(image, 56, ly-10, lm)
+    q2 = is_pixel_up(image, 56, ly, lm) and not is_pixel_up(image, 56, ly-10, lm)
     return(q1*1+q2*2)
     
 
@@ -395,12 +397,19 @@ def get_cropped_image_num(image,num):
     h, w = image.shape[:2]
     c_left = 0
     c_right = w
+    c_top = 0
+    c_bottom = h
+    
+    #print("num="+str(num))
     if (num==1):
-        c_top = int (h * 0.1) 
+        c_top = max(int (h * 0.1),144) 
         c_bottom = h
     if (num==2):
         c_top = 35 
-        c_bottom = h 
+        c_bottom = h -195
+    if (num==3):
+        c_top = 35 
+        c_bottom = h -195
     dest = image[c_top:c_bottom, c_left:c_right]
     return (dest)
 
