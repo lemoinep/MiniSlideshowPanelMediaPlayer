@@ -27,6 +27,11 @@ from tqdm import tqdm
 import shutil
 import zipfile
 
+import pygame
+from pydub import AudioSegment
+
+from scipy.signal import spectrogram
+
 register_heif_opener()  # Register HEIF support
 
 VIDEO_EXTENSIONS = ('.mp4', '.webm')
@@ -353,6 +358,8 @@ def CV_Stereo_Anaglyph_Color(img_stereo, parallax_offset=0):
     
     return anaglyph
 
+#------------------------------------------------------------------------------
+
 def is_pixel_down(img, x, y, value):
     if x < 0 or x >= img.shape[1] or y < 0 or y >= img.shape[0]:
         return False
@@ -427,6 +434,8 @@ def get_cropped_movie(image):
         
     dest = image[c_top:c_bottom, c_left:c_right]
     return (dest)
+
+#------------------------------------------------------------------------------
 
 def view_picture_zoom(image_path):
  
@@ -592,6 +601,7 @@ def view_picture_zoom(image_path):
         
     cv2.destroyAllWindows()
     
+#------------------------------------------------------------------------------
 
 def view_pdf_zoom(pdf_path, dpi=150):
     doc = fitz.open(pdf_path)
@@ -749,6 +759,7 @@ def view_pdf_zoom(pdf_path, dpi=150):
     cv2.destroyAllWindows()
     doc.close()
 
+#------------------------------------------------------------------------------
 
 def play_video_with_seek_and_pause(video_path):
     zoom_scale = 1.0
@@ -862,13 +873,7 @@ def play_video_with_seek_and_pause(video_path):
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
     ratio = width / height
-    
-    #if ratio > lim_ratio_anaglyph:
-    #    qAnaglyph = True
-    #    width = width // 2
-    #    ratio = width / height
-    #    parallax_offset = 0
-        
+            
     cap.set(cv2.CAP_PROP_POS_FRAMES, 25)
     ret, frame = cap.read()
     
@@ -1002,7 +1007,147 @@ def play_video_with_seek_and_pause(video_path):
     cap.release()
     cv2.destroyAllWindows()
 
+#------------------------------------------------------------------------------
 
+
+def play_audio_with_seek_and_waveform(audio_path):
+    if audio_path.lower().endswith(".mp3"):
+        audio_info = MP3(audio_path)
+        duration_sec = float(audio_info.info.length)
+    else:
+        audio_info = WAVE(audio_path)
+        duration_sec = float(audio_info.info.length)
+
+    audio_seg = AudioSegment.from_file(audio_path)
+    samples = np.array(audio_seg.get_array_of_samples())
+    if audio_seg.channels > 1:
+        samples = samples.reshape((-1, audio_seg.channels)).mean(axis=1)
+
+    samples = samples.astype(np.float32)
+    samples /= np.max(np.abs(samples)) + 1e-9
+
+    sr = audio_seg.frame_rate
+
+    width = 1600
+    h_wave = 200
+    h_spec = 200
+    height = h_wave + h_spec
+
+    wave_img = np.zeros((h_wave, width, 3), dtype=np.uint8)
+    step = max(1, int(len(samples) / width))
+    mid_y = h_wave // 2
+    amp = int(h_wave * 0.4)
+
+    for x in range(width):
+        idx = x * step
+        if idx >= len(samples):
+            break
+        val = samples[idx]
+        y = int(val * amp)
+        cv2.line(wave_img,
+                 (x, mid_y - y),
+                 (x, mid_y + y),
+                 (255, 255, 255), 1)
+
+    nperseg = 1024
+    noverlap = nperseg // 2
+    freqs, times, Sxx = spectrogram(samples, fs=sr, nperseg=nperseg, noverlap=noverlap)  
+    Sxx = np.abs(Sxx)
+    Sxx = 10 * np.log10(Sxx + 1e-9)
+
+    S_min, S_max = Sxx.min(), Sxx.max()
+    S_norm = (Sxx - S_min) / (S_max - S_min + 1e-9)
+    spec_img = (S_norm * 255).astype(np.uint8)
+
+    spec_img = cv2.resize(spec_img, (width, h_spec), interpolation=cv2.INTER_LINEAR)
+    spec_img = cv2.flip(spec_img, 0)  # 0 Hz en bas
+
+    spec_img_color = cv2.applyColorMap(spec_img, cv2.COLORMAP_JET)
+
+
+    pygame.mixer.init(frequency=audio_seg.frame_rate,
+                      channels=audio_seg.channels)
+    pygame.mixer.music.load(audio_path)
+
+    window_name = "Audio Player"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
+    cv2.resizeWindow(window_name, width, height)
+
+    qLoop = True
+    paused = False
+    current_time = 0.0  
+    base_offset = 0.0   
+
+    def seek_to_time(t_sec):
+        nonlocal current_time, base_offset, paused
+        t_sec = max(0.0, min(duration_sec, t_sec))
+        base_offset = t_sec
+        current_time = t_sec
+        pygame.mixer.music.play(start=t_sec)
+        paused = False
+
+    def mouse_callback(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN and duration_sec > 0:
+            ratio = x / float(width)
+            ratio = max(0.0, min(1.0, ratio))
+            t_sec = ratio * duration_sec
+            seek_to_time(t_sec)
+
+    cv2.setMouseCallback(window_name, mouse_callback)
+
+    pygame.mixer.music.play()
+    clock = pygame.time.Clock()
+
+    while qLoop:
+        if not paused:
+            pos_ms = pygame.mixer.music.get_pos()
+            if pos_ms < 0:
+                qLoop = False
+                break
+            current_time = base_offset + pos_ms / 1000.0
+
+        frame = np.zeros((height, width, 3), dtype=np.uint8)
+
+        frame[0:h_wave, :, :] = wave_img
+
+        frame[h_wave:h_wave + h_spec, :, :] = spec_img_color
+
+        ratio = current_time / duration_sec if duration_sec > 0 else 0.0
+        ratio = max(0.0, min(1.0, ratio))
+        x = int(ratio * width)
+        cv2.line(frame, (x, 0), (x, h_wave - 1), (0, 0, 255), 2)
+        cv2.line(frame, (x, h_wave), (x, height - 1), (0, 0, 255), 2)
+
+        cv2.imshow(window_name, frame)
+        key = cv2.waitKey(20) & 0xFF
+
+        if key == 27:
+            qLoop = False
+        elif key == ord(' '):
+            if paused:
+                pygame.mixer.music.unpause()
+            else:
+                pygame.mixer.music.pause()
+            paused = not paused
+        elif key == ord('.'):
+            seek_to_time(0.0)
+        elif key == ord('s'):
+            path = Path(audio_path).parent
+            new_path = path / "Screenshot"
+            new_path.mkdir(parents=True, exist_ok=True)
+            date_time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+            outputName = f"WaveFFT_{date_time}.jpg"
+            outputName = new_path / outputName
+            cv2.imwrite(str(outputName), frame)
+
+        clock.tick(60)
+
+    pygame.mixer.music.stop()
+    cv2.destroyWindow(window_name)
+
+
+#------------------------------------------------------------------------------
 #------------------------------------------------------------------------------
 
 def sub_is_frame_black(frame, threshold=10):
@@ -1719,12 +1864,15 @@ class Slideshow:
 
         
     def open_with_default_audio_player(self, audio_path):
-        if sys.platform.startswith('darwin'):
-            subprocess.Popen(['open', audio_path])
-        elif os.name == 'nt':
-            os.startfile(audio_path)
-        elif os.name == 'posix':
-            subprocess.Popen(['xdg-open', audio_path])
+        if self.qModeSoftwareView:
+            if sys.platform.startswith('darwin'):
+                subprocess.Popen(['open', audio_path])
+            elif os.name == 'nt':
+                os.startfile(audio_path)
+            elif os.name == 'posix':
+                subprocess.Popen(['xdg-open', audio_path])
+        else :
+            play_audio_with_seek_and_waveform(audio_path)
 
     def next_image(self):
         if self.images:
