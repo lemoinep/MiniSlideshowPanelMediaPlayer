@@ -273,9 +273,9 @@ def is_stereo_image(img_stereo, similarity_threshold=0.8):
         raise ValueError("Image not found or unsupported file format")
 
     height, width = img.shape
-    # La largeur doit être paire pour pouvoir couper en deux
     if width % 2 != 0:
-        raise ValueError("The image width must be even")
+        return False
+        #raise ValueError("The image width must be even")
 
     left_img = img[:, :width//2]
     right_img = img[:, width//2:]
@@ -393,6 +393,8 @@ def num_type_zone(image):
     lx = 9
     ly = 9
     q1 = is_pixel_down(image, lx, ly, lm) and is_pixel_down(image, w-lx, ly, lm) and is_pixel_down(image, w // 2, ly, lm)
+    q1n = is_pixel_down(image, lx, 200, lm) or is_pixel_down(image,w-lx, 200, lm)
+    q1 = q1 and not q1n
     lm = 240
     ly = 31
     #q2 = is_pixel_up(image, 56, ly, lm) and is_pixel_up(image, 94, ly, lm) and not is_pixel_up(image, 56, ly-10, lm)
@@ -408,6 +410,7 @@ def get_cropped_image_num(image,num):
     c_bottom = h
     
     #print("num="+str(num))
+    
     if (num==1):
         c_top = max(int (h * 0.1),144) 
         c_bottom = h
@@ -511,9 +514,6 @@ def view_picture_zoom(image_path):
         img = get_cropped_image_num(img, num_type_crop)
         height, width = img.shape[:2]
                                  
-    window_name = 'Picture Zoom'
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
     ratio = width / height
     
     if is_stereo_image(img):
@@ -530,15 +530,22 @@ def view_picture_zoom(image_path):
         lw = 1910
         lh = int(lw / ratio)
         
+        
+    window_name = 'Picture Zoom'
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1) 
+        
     cv2.resizeWindow(window_name, lw, lh)
-    cv2.setMouseCallback(window_name, mouse_callback)
-    
+
     screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
     screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080  
 
     start_x = int((screen_width - lw) / 2)
     start_y = int((screen_height - lh) / 2)
     cv2.moveWindow(window_name, start_x, start_y)
+    
+    cv2.setMouseCallback(window_name, mouse_callback)
+    time.sleep(10/1000)
 
     while qLoop:
         if mouse_x == -1 and mouse_y == -1:
@@ -600,6 +607,7 @@ def view_picture_zoom(image_path):
         elif key == ord('6'): parallax_offset = parallax_offset + 1
         
     cv2.destroyAllWindows()
+    time.sleep(500/1000)
     
 #------------------------------------------------------------------------------
 
@@ -613,6 +621,8 @@ def view_pdf_zoom(pdf_path, dpi=150):
     zoom_max = 15.0
     mouse_x, mouse_y = -1, -1
     qLoop = True
+    numEventMouse = 0
+    numEvent = 0
     
     qDrawLineOnImage = True
 
@@ -670,9 +680,12 @@ def view_pdf_zoom(pdf_path, dpi=150):
         cropped = image[top:bottom, left:right]
         zoomed = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
         return zoomed
+    
+    def mouse_click_inside(x, y, x1, y1, x2, y2):
+        return x1 <= x <= x2 and y1 <= y <= y2
 
     def mouse_callback(event, x, y, flags, param):
-        nonlocal zoom_scale, mouse_x, mouse_y, qLoop
+        nonlocal zoom_scale, mouse_x, mouse_y, qLoop, numEventMouse
         mouse_x, mouse_y = x, y
         if event == cv2.EVENT_MOUSEWHEEL:
             if flags < 0:
@@ -681,8 +694,12 @@ def view_pdf_zoom(pdf_path, dpi=150):
                 zoom_scale = max(zoom_scale - 0.1, zoom_min)
         if event == cv2.EVENT_RBUTTONDOWN:
             qLoop = False
+            
+        if event == cv2.EVENT_LBUTTONDOWN:
+            numEventMouse = 1
+                 
 
-    cv2.setMouseCallback(window_name, mouse_callback)
+    
 
     ratio = width / height
     lh = 900
@@ -694,16 +711,17 @@ def view_pdf_zoom(pdf_path, dpi=150):
         
         
     cv2.resizeWindow(window_name, lw, lh)
-
     
     screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
     screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080  
     
     start_x = int((screen_width - lw) / 2)
     start_y = int((screen_height - lh) / 2)
+
     cv2.moveWindow(window_name, start_x, start_y)
-
-
+    cv2.setMouseCallback(window_name, mouse_callback)
+    time.sleep(10/1000)
+    
     while qLoop:
         if mouse_x == -1 and mouse_y == -1:
             mouse_x, mouse_y = width // 2, height // 2
@@ -712,7 +730,14 @@ def view_pdf_zoom(pdf_path, dpi=150):
         if qDrawLineOnImage :
             zoomed_img=draw_line_on_image(page_index+1, page_count, zoomed_img)
         cv2.imshow(window_name, zoomed_img)
-
+        
+        if numEventMouse==1:
+            numEventMouse = 0
+            if mouse_click_inside(mouse_x, mouse_y, width - int(0.1*width), 0, width , height):
+                numEvent = 3
+            if mouse_click_inside(mouse_x, mouse_y, 0, 0, int(0.1*width), height):
+                numEvent = 1
+                
         key = cv2.waitKey(20) & 0xFF
         if key == 27:      # ESC
             break
@@ -727,6 +752,13 @@ def view_pdf_zoom(pdf_path, dpi=150):
         elif key == ord('.'):
             zoom_scale = 1.0
         elif key == ord('3') or key == ord(' '):   
+            numEvent = 3
+        elif key == ord('1'):   
+            numEvent = 1
+        elif key == ord('L'): qDrawLineOnImage = not qDrawLineOnImage
+        
+        if numEvent == 3:
+            numEvent = 0
             if page_index < page_count - 1:
                 page_index += 1
                 img = render_page(page_index)
@@ -740,7 +772,9 @@ def view_pdf_zoom(pdf_path, dpi=150):
                 cv2.moveWindow(window_name, start_x, start_y)
                 mouse_x, mouse_y = -1, -1
                 zoom_scale = 1.0
-        elif key == ord('1'):   
+                
+        if numEvent == 1:
+            numEvent = 0
             if page_index > 0:
                 page_index -= 1
                 img = render_page(page_index)
@@ -754,9 +788,10 @@ def view_pdf_zoom(pdf_path, dpi=150):
                 cv2.moveWindow(window_name, start_x, start_y)
                 mouse_x, mouse_y = -1, -1
                 zoom_scale = 1.0
-        elif key == ord('L'): qDrawLineOnImage = not qDrawLineOnImage
+        
 
     cv2.destroyAllWindows()
+    time.sleep(500/1000)
     doc.close()
 
 #------------------------------------------------------------------------------
@@ -868,16 +903,13 @@ def play_video_with_seek_and_pause(video_path):
     fps_movie = fps
     paused = False
     current_frame = 0
-
-    window_name = 'Movie Player'
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
+    
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 25)
+    ret, frame = cap.read()   
     ratio = width / height
             
-    cap.set(cv2.CAP_PROP_POS_FRAMES, 25)
-    ret, frame = cap.read()
-    
     qAutoCrop = is_pixel_down(frame, 3, 3, 15) and is_pixel_down(frame, width-3, 3, 15) and is_pixel_down(frame, width // 2, 3, 15)
+    qAutoCrop = qAutoCrop and (height > width)
     
     if qAutoCrop:
         img = get_cropped_movie(frame)
@@ -895,6 +927,10 @@ def play_video_with_seek_and_pause(video_path):
     cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
     ret, frame = cap.read()
     
+    window_name = 'Movie Player'
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
+    
     lh = 900
     lw = int(lh * ratio)
     
@@ -903,16 +939,15 @@ def play_video_with_seek_and_pause(video_path):
         lh = int(lw / ratio)
     
     cv2.resizeWindow(window_name, lw, lh)
-    cv2.setMouseCallback(window_name, mouse_callback)
     
     screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
     screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080  
 
     start_x = int((screen_width - lw) / 2)
     start_y = int((screen_height - lh) / 2)
+        
+    time.sleep(10/1000)
     cv2.moveWindow(window_name, start_x, start_y)
-    
-    
     cv2.setMouseCallback(window_name, mouse_callback)
 
     while qLoop:
@@ -1006,6 +1041,7 @@ def play_video_with_seek_and_pause(video_path):
                     
     cap.release()
     cv2.destroyAllWindows()
+    time.sleep(500/1000)
 
 #------------------------------------------------------------------------------
 
@@ -1028,9 +1064,9 @@ def play_audio_with_seek_and_waveform(audio_path):
 
     sr = audio_seg.frame_rate
 
-    width = 1600
-    h_wave = 200
-    h_spec = 200
+    width = 1800
+    h_wave = 450
+    h_spec = 450
     height = h_wave + h_spec
 
     wave_img = np.zeros((h_wave, width, 3), dtype=np.uint8)
@@ -1073,6 +1109,15 @@ def play_audio_with_seek_and_waveform(audio_path):
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
     cv2.resizeWindow(window_name, width, height)
+    
+    
+    screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
+    screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080  
+
+    start_x = int((screen_width - width) / 2)
+    start_y = int((screen_height - height) / 2)
+    cv2.moveWindow(window_name, start_x, start_y)
+    
 
     qLoop = True
     paused = False
@@ -1088,11 +1133,14 @@ def play_audio_with_seek_and_waveform(audio_path):
         paused = False
 
     def mouse_callback(event, x, y, flags, param):
+        nonlocal qLoop
         if event == cv2.EVENT_LBUTTONDOWN and duration_sec > 0:
             ratio = x / float(width)
             ratio = max(0.0, min(1.0, ratio))
             t_sec = ratio * duration_sec
             seek_to_time(t_sec)
+        if event == cv2.EVENT_RBUTTONDOWN:
+            qLoop = False
 
     cv2.setMouseCallback(window_name, mouse_callback)
 
