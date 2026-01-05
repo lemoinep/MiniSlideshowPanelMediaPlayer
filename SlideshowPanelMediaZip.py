@@ -34,7 +34,7 @@ from scipy.signal import spectrogram
 
 register_heif_opener()  # Register HEIF support
 
-VIDEO_EXTENSIONS = ('.mp4', '.webm')
+VIDEO_EXTENSIONS = ('.mp4', '.webm', '.avi')
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG',".avif",".AVIF",".heif",".HEIF",".bmp",".BMP",".tif",".TIF")
 SOUND_EXTENSIONS = ('.mp3', '.wav')
 PDF_EXTENSIONS = ('.pdf', '.PDF')
@@ -265,8 +265,108 @@ def CV_Entropy(img, block_size=(32, 32)):
     
     return entrop_img
 
+def CV_Dilate(img, d=3):
+    kernel = np.ones((d,d),np.uint8)
+    return cv2.dilate(img, kernel, iterations = 1)
+    
+def CV_Erode(img, d=3):
+    kernel = np.ones((d,d),np.uint8)
+    return cv2.erode(img, kernel, iterations = 1)
 
-def is_stereo_image(img_stereo, similarity_threshold=0.8):
+def CV_RemoveNoise(img):
+    return cv2.medianBlur(img,5)
+
+def CV_Opening(img, d=3):
+    kernel = np.ones((d,d),np.uint8)
+    return cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel)
+
+def CV_Canny(img):
+    return cv2.Canny(img, 100, 200)
+
+def CV_ContourDetection(img):
+    dest=255-cv2.Canny(img,100,100,True)
+    return (dest) 
+
+
+def CV_OilPaintingEffect(img, size=7, dynRatio=1):
+    """
+    Apply oil painting effect to an image.
+
+    Args:
+        img (np.array): Input BGR image.
+        size (int): Neighborhood size for effect.
+        dynRatio (int): Dynamic ratio, higher values increase effect.
+        apply (bool)
+    Returns:
+        np.array: Image with oil painting effect.
+    """
+    if not hasattr(cv2, 'xphoto') or not hasattr(cv2.xphoto, 'oilPainting'):
+        raise ImportError("OpenCV xphoto module or oilPainting function not available. Install opencv-contrib-python.")
+    return cv2.xphoto.oilPainting(img, size, dynRatio)
+
+def CV_PointillismEffect(img, dot_radius=5, step=10):
+    """
+    Apply pointillism effect by drawing colored dots on a white canvas.
+
+    Args:
+        img (np.array): Input BGR image.
+        dot_radius (int): Radius of dots.
+        step (int): Step size between dots.
+        apply (bool)
+    Returns:
+        np.array: Image with pointillism effect.
+    """
+    height, width = img.shape[:2]
+    canvas = 255 * np.ones_like(img)
+    for y in range(0, height, step):
+        for x in range(0, width, step):
+            color = img[y, x].tolist()
+            cv2.circle(canvas, (x, y), dot_radius, color, -1, lineType=cv2.LINE_AA)
+    return canvas
+
+
+def CV_AdvancedPointillism(img, num_colors=20, dot_radius=None, step=None):
+    """
+    Apply advanced pointillism effect by reducing color palette and jittering dot positions.
+
+    Args:
+        img (np.array): Input BGR image.
+        num_colors (int): Number of colors for palette reduction.
+        dot_radius (int): Dot radius; auto-calculated if None.
+        step (int): Step between dots; auto-calculated if None.
+        apply (bool)
+    Returns:
+        np.array: Image with advanced pointillism effect.
+    """
+    h, w = img.shape[:2]
+    if dot_radius is None:
+        dot_radius = max(3, min(h, w) // 100)
+    if step is None:
+        step = dot_radius * 2
+
+    pixel_vals = img.reshape((-1, 3))
+    pixel_vals = np.float32(pixel_vals)
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.85)
+    _, labels, centers = cv2.kmeans(pixel_vals, num_colors, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+    centers = np.uint8(centers)
+    labels = labels.flatten()
+    quantized_img = centers[labels].reshape((h, w, 3))
+    canvas = 255 * np.ones_like(img)
+    rng = np.random.default_rng()
+
+    for y in range(0, h, step):
+        for x in range(0, w, step):
+            color = quantized_img[y, x].tolist()
+            jitter_x = int(rng.integers(-step//3, step//3))
+            jitter_y = int(rng.integers(-step//3, step//3))
+            cx = np.clip(x + jitter_x, 0, w-1)
+            cy = np.clip(y + jitter_y, 0, h-1)
+            cv2.circle(canvas, (cx, cy), dot_radius, color, -1, lineType=cv2.LINE_AA)
+
+    return canvas
+
+
+def is_stereo_image(img_stereo, similarity_threshold=0.7):
     img = cv2.cvtColor(img_stereo, cv2.COLOR_BGR2GRAY)
     
     if img is None:
@@ -284,6 +384,8 @@ def is_stereo_image(img_stereo, similarity_threshold=0.8):
     right_norm = (right_img - np.mean(right_img)) / (np.std(right_img) + 1e-10)
 
     correlation = np.mean(left_norm * right_norm)
+    
+    #print("Stereo correlation="+str(correlation))
 
     return correlation > similarity_threshold
 
@@ -358,6 +460,40 @@ def CV_Stereo_Anaglyph_Color(img_stereo, parallax_offset=0):
     
     return anaglyph
 
+
+def CV_Stereo_Anaglyph_Movie_Color(img_stereo, qStereoImage, parallax_offset=0):
+    height, width, _ = img_stereo.shape
+
+    ratio = width / height
+
+    if qStereoImage:
+        img_left = img_stereo[:, :width//2, :]
+        img_right = img_stereo[:, width//2:, :]
+    else:
+        img_left = img_stereo
+        img_right = img_stereo
+        
+    if parallax_offset != 0:
+        M = np.float32([[1, 0, parallax_offset], [0, 1, 0]])
+        img_right = cv2.warpAffine(
+            img_right,
+            M,
+            (img_right.shape[1], img_right.shape[0]),
+            borderMode=cv2.BORDER_REPLICATE
+        )
+
+    min_height = min(img_left.shape[0], img_right.shape[0])
+    min_width = min(img_left.shape[1], img_right.shape[1])
+    img_left = img_left[:min_height, :min_width]
+    img_right = img_right[:min_height, :min_width]
+
+    anaglyph = np.zeros((min_height, min_width, 3), dtype=img_stereo.dtype)
+    anaglyph[:, :, 0] = img_right[:,:,0]   # Blue
+    #anaglyph[:, :, 1] = img_left[:,:,1]    # Green
+    anaglyph[:, :, 1] = img_right[:,:,1]    # Green
+    anaglyph[:, :, 2] = img_left[:,:,2]    # Red
+    
+    return anaglyph
 #------------------------------------------------------------------------------
 
 def is_pixel_down(img, x, y, value):
@@ -399,6 +535,12 @@ def num_type_zone(image):
     ly = 31
     #q2 = is_pixel_up(image, 56, ly, lm) and is_pixel_up(image, 94, ly, lm) and not is_pixel_up(image, 56, ly-10, lm)
     q2 = is_pixel_up(image, 56, ly, lm) and not is_pixel_up(image, 56, ly-10, lm)
+    
+    ly = 23
+    q3 = is_pixel_up(image, 56, ly, lm) and not is_pixel_up(image, 56, ly-10, lm)
+    
+    q2 = q2 or q3
+    
     return(q1*1+q2*2)
     
 
@@ -409,7 +551,7 @@ def get_cropped_image_num(image,num):
     c_top = 0
     c_bottom = h
     
-    #print("num="+str(num))
+    print("num="+str(num))
     
     if (num==1):
         c_top = max(int (h * 0.1),144) 
@@ -467,6 +609,11 @@ def view_picture_zoom(image_path):
     qAnaglyph = False
     levelAnaglyph = 0
     qAutoCrop = False
+    qCanny = False
+    qDilate = False
+    qErode = False
+    qPointillismEffect = False
+    qOilPaintingEffect = False
 
     
     def mouse_callback(event, x, y, flags, param):
@@ -546,6 +693,9 @@ def view_picture_zoom(image_path):
     
     cv2.setMouseCallback(window_name, mouse_callback)
     time.sleep(10/1000)
+    
+    if height < lh : # Auto qResize
+        qResizeToWindow = True
 
     while qLoop:
         if mouse_x == -1 and mouse_y == -1:
@@ -557,22 +707,20 @@ def view_picture_zoom(image_path):
         else:
             zoomed_img = get_zoomed_image(img, zoom_scale, mouse_x, mouse_y)
 
-        if qClache  :
-            zoomed_img = CV_CLAHE(zoomed_img)
-        if qSharpen :
-            zoomed_img = CV_Sharpen2d(zoomed_img, 0.1, 0.0,  1)       
-        if qEnhanceColor :
-            zoomed_img = CV_EnhanceColor(zoomed_img)
-        if qVibrance :
-            zoomed_img = CV_Vibrance2D(zoomed_img)
-        if qBrightnessContrast :
-            zoomed_img = CV_AdjustBrightnessContrast(zoomed_img)
-        if qAdaptativeContrast :
-            zoomed_img = CV_AdaptativeContrast(zoomed_img)
-        if qSaliency :
-            zoomed_img = CV_SaliencyAddWeighted(zoomed_img)
-        if qEntropy:
-            zoomed_img = CV_Entropy(zoomed_img)
+        if qPointillismEffect : zoomed_img = CV_PointillismEffect(zoomed_img, 7, 10) 
+        if qOilPaintingEffect : zoomed_img = CV_OilPaintingEffect(zoomed_img, 3, 1)
+        
+        if qDilate : zoomed_img = CV_Dilate(zoomed_img)
+        if qErode : zoomed_img = CV_Erode(zoomed_img)
+        if qCanny : zoomed_img = CV_Canny(zoomed_img)
+        if qClache  : zoomed_img = CV_CLAHE(zoomed_img)
+        if qSharpen : zoomed_img = CV_Sharpen2d(zoomed_img, 0.1, 0.0,  1)       
+        if qEnhanceColor : zoomed_img = CV_EnhanceColor(zoomed_img)
+        if qVibrance : zoomed_img = CV_Vibrance2D(zoomed_img)
+        if qBrightnessContrast : zoomed_img = CV_AdjustBrightnessContrast(zoomed_img)
+        if qAdaptativeContrast : zoomed_img = CV_AdaptativeContrast(zoomed_img)
+        if qSaliency : zoomed_img = CV_SaliencyAddWeighted(zoomed_img)
+        if qEntropy: zoomed_img = CV_Entropy(zoomed_img)
             
         if qAnaglyph and levelAnaglyph==0:
             zoomed_img = CV_Stereo_Anaglyph_Color(zoomed_img, parallax_offset)
@@ -600,6 +748,12 @@ def view_picture_zoom(image_path):
         elif key == ord('b'): qBrightnessContrast = not qBrightnessContrast
         elif key == ord('c'): qAdaptativeContrast = not qAdaptativeContrast
         elif key == ord('t'): qEntropy = not qEntropy
+        elif key == ord('y'): qCanny = not qCanny
+        elif key == ord('D'): qDilate = not qDilate
+        elif key == ord('d'): qErode = not qErode
+        elif key == ord('p'): qPointillismEffect = not qPointillismEffect
+        elif key == ord('o'): qOilPaintingEffect = not qOilPaintingEffect
+        
         elif key == ord('.'): zoom_scale = 1.0
         
         elif key == ord('n'): qAnaglyph = not qAnaglyph
@@ -611,7 +765,7 @@ def view_picture_zoom(image_path):
     
 #------------------------------------------------------------------------------
 
-def view_pdf_zoom(pdf_path, dpi=150):
+def view_pdf_zoom(pdf_path, dpi=300):
     doc = fitz.open(pdf_path)
     page_count = doc.page_count
 
@@ -624,8 +778,18 @@ def view_pdf_zoom(pdf_path, dpi=150):
     numEventMouse = 0
     numEvent = 0
     
+    qVibrance = False
+    qSaliency = False
+    qSharpen = False
+    qEnhanceColor = False
+    qAdaptativeContrast = False
+    
+    qResizeToWindow = False
+    
     qDrawLineOnImage = True
-
+    
+    qDilateText = False
+    
     window_name = 'PDF Viewer'
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
@@ -721,26 +885,53 @@ def view_pdf_zoom(pdf_path, dpi=150):
     cv2.moveWindow(window_name, start_x, start_y)
     cv2.setMouseCallback(window_name, mouse_callback)
     time.sleep(10/1000)
-    
+        
     while qLoop:
         if mouse_x == -1 and mouse_y == -1:
             mouse_x, mouse_y = width // 2, height // 2
-
+                   
+        if qResizeToWindow:
+            img = cv2.resize(img, (lw, lh), interpolation=cv2.INTER_LINEAR)            
+            
         zoomed_img = get_zoomed_image(img, zoom_scale, mouse_x, mouse_y)
+        
+        
+        if qDilateText :
+            zoomed_img = CV_Erode(zoomed_img)
+        if qSharpen :
+            zoomed_img = CV_Sharpen2d(zoomed_img, 0.1, 0.0,  1)
+        if qEnhanceColor : 
+            zoomed_img = CV_EnhanceColor(zoomed_img)
+        if qAdaptativeContrast :
+            zoomed_img = CV_AdaptativeContrast(zoomed_img)
+        if qVibrance : 
+            zoomed_img = CV_Vibrance2D(zoomed_img)        
+        if qSaliency :
+            zoomed_img = CV_SaliencyAddWeighted(zoomed_img)
+        
         if qDrawLineOnImage :
             zoomed_img=draw_line_on_image(page_index+1, page_count, zoomed_img)
+            
         cv2.imshow(window_name, zoomed_img)
         
         if numEventMouse==1:
             numEventMouse = 0
-            if mouse_click_inside(mouse_x, mouse_y, width - int(0.1*width), 0, width , height):
-                numEvent = 3
-            if mouse_click_inside(mouse_x, mouse_y, 0, 0, int(0.1*width), height):
-                numEvent = 1
-                
+            if qResizeToWindow:
+                if mouse_click_inside(mouse_x, mouse_y, lw - int(0.05*lw), 0, lw , lh):
+                    numEvent = 3
+                if mouse_click_inside(mouse_x, mouse_y, 0, 0, int(0.05*lw), lh):
+                    numEvent = 1                
+            else :            
+                if mouse_click_inside(mouse_x, mouse_y, width - int(0.1*width), 0, width , height):
+                    numEvent = 3
+                if mouse_click_inside(mouse_x, mouse_y, 0, 0, int(0.1*width), height):
+                    numEvent = 1
+        
         key = cv2.waitKey(20) & 0xFF
         if key == 27:      # ESC
             break
+        elif key == ord(' '):
+            numEvent = 3
         elif key == ord('s'):
             path = Path(pdf_path).parent
             new_path = path / "Screenshot"
@@ -749,13 +940,19 @@ def view_pdf_zoom(pdf_path, dpi=150):
             outputName = f"PDF_{page_index+1}_{date_time}.jpg"
             outputName = new_path / outputName
             cv2.imwrite(str(outputName), zoomed_img)
-        elif key == ord('.'):
-            zoom_scale = 1.0
-        elif key == ord('3') or key == ord(' '):   
-            numEvent = 3
-        elif key == ord('1'):   
-            numEvent = 1
+        elif key == ord('.'): zoom_scale = 1.0
+        elif key == ord('3') or key == ord(' '): numEvent = 3
+        elif key == ord('1'): numEvent = 1
         elif key == ord('L'): qDrawLineOnImage = not qDrawLineOnImage
+        elif key == ord('x'): qSharpen = not qSharpen
+        elif key == ord('e'): qEnhanceColor = not qEnhanceColor
+        elif key == ord('c'): qAdaptativeContrast = not qAdaptativeContrast
+        elif key == ord('v'): qVibrance = not qVibrance 
+        elif key == ord('a'): qSaliency = not qSaliency
+        elif key == ord('r'): 
+            qResizeToWindow = not qResizeToWindow
+            img = render_page(page_index)
+        elif key == ord('d'): qDilateText = not qDilateText
         
         if numEvent == 3:
             numEvent = 0
@@ -815,8 +1012,13 @@ def play_video_with_seek_and_pause(video_path):
     qAdaptativeContrast = False
     qEntropy = False
     qAnaglyph = False
+    qStereoImage = False
     levelAnaglyph = 0
     qAutoCrop = False
+    qResizeToWindow = False
+    qCanny = False
+    qDilate = False
+    qErode = False
     
     def draw_line_on_image(num_frame, nb_frames,img):
         height, width = img.shape[:2]
@@ -919,6 +1121,7 @@ def play_video_with_seek_and_pause(video_path):
     
     if is_stereo_image(frame):
         qAnaglyph = True
+        qStereoImage = True
         width = width // 2
         ratio = width / height
         parallax_offset = 0
@@ -949,6 +1152,9 @@ def play_video_with_seek_and_pause(video_path):
     time.sleep(10/1000)
     cv2.moveWindow(window_name, start_x, start_y)
     cv2.setMouseCallback(window_name, mouse_callback)
+    
+    if height < lh : # Auto qResize
+        qResizeToWindow = True
 
     while qLoop:
         if not paused:
@@ -970,33 +1176,33 @@ def play_video_with_seek_and_pause(video_path):
 
         if qAutoCrop:
             frame = get_cropped_movie(frame)
+            
+        if qResizeToWindow:
+            frame = cv2.resize(frame, (lw, lh), interpolation=cv2.INTER_LINEAR)
+            
 
         if qAnaglyph and levelAnaglyph==1:
-            img2 = CV_Stereo_Anaglyph_Color(frame, parallax_offset)
+            img2 = CV_Stereo_Anaglyph_Movie_Color(frame, qStereoImage, parallax_offset)
             zoomed_img = get_zoomed_image(img2, zoom_scale, mouse_x, mouse_y)
         else:
             zoomed_img = get_zoomed_image(frame, zoom_scale, mouse_x, mouse_y)
-                
-        if qClache  :
-            zoomed_img = CV_CLAHE(zoomed_img)
-        if qSharpen :
-            zoomed_img = CV_Sharpen2d(zoomed_img, 0.1, 0.0,  1)
-        if qEnhanceColor :
-            zoomed_img = CV_EnhanceColor(zoomed_img)
-        if qVibrance :
-            zoomed_img = CV_Vibrance2D(zoomed_img)
-        if qBrightnessContrast :
-            zoomed_img = CV_AdjustBrightnessContrast(zoomed_img)
-        if qAdaptativeContrast :
-            zoomed_img = CV_AdaptativeContrast(zoomed_img)
-        if qSaliency :
-            zoomed_img = CV_SaliencyAddWeighted(zoomed_img)
+              
             
-        if qEntropy:
-            zoomed_img = CV_Entropy(zoomed_img)
+        if qDilate : zoomed_img = CV_Dilate(zoomed_img)
+        if qErode : zoomed_img = CV_Erode(zoomed_img)
+        if qCanny : zoomed_img = CV_Canny(zoomed_img) 
+        if qClache  : zoomed_img = CV_CLAHE(zoomed_img)
+        if qSharpen : zoomed_img = CV_Sharpen2d(zoomed_img, 0.1, 0.0,  1)
+        if qEnhanceColor : zoomed_img = CV_EnhanceColor(zoomed_img)
+        if qVibrance : zoomed_img = CV_Vibrance2D(zoomed_img)
+        if qBrightnessContrast : zoomed_img = CV_AdjustBrightnessContrast(zoomed_img)
+        if qAdaptativeContrast : zoomed_img = CV_AdaptativeContrast(zoomed_img)
+        if qSaliency : zoomed_img = CV_SaliencyAddWeighted(zoomed_img)
+            
+        if qEntropy: zoomed_img = CV_Entropy(zoomed_img)
             
         if qAnaglyph and levelAnaglyph==0:
-            zoomed_img = CV_Stereo_Anaglyph_Color(zoomed_img,parallax_offset)
+            zoomed_img = CV_Stereo_Anaglyph_Movie_Color(zoomed_img, qStereoImage, parallax_offset)
             
         if qDrawLineOnImage :
             zoomed_img=draw_line_on_image(current_frame, frame_count, zoomed_img)
@@ -1032,8 +1238,14 @@ def play_video_with_seek_and_pause(video_path):
         elif key == ord('h'): qClache = not qClache
         elif key == ord('b'): qBrightnessContrast = not qBrightnessContrast
         elif key == ord('c'): qAdaptativeContrast = not qAdaptativeContrast
+        elif key == ord('y'): qCanny = not qCanny
+        elif key == ord('D'): qDilate = not qDilate
+        elif key == ord('d'): qErode = not qErode
+        
         elif key == ord('t'): qEntropy = not qEntropy
         elif key == ord('.'): zoom_scale = 1.
+        
+        elif key == ord('r'): qResizeToWindow = not qResizeToWindow
         
         elif key == ord('n'): qAnaglyph = not qAnaglyph
         elif key == ord('4'): parallax_offset = parallax_offset - 1
