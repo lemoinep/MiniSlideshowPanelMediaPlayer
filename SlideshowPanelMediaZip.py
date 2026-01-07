@@ -1660,6 +1660,8 @@ class Slideshow:
         self.master.bind("<Right>", lambda e: self.next_image())
         
         self.master.bind("m", self.mode_soft_app_key)
+        
+        self.master.bind("<Button-1>", self.on_left_click)
 
 
     def init_video_cache_zip1(self):
@@ -2158,7 +2160,17 @@ class Slideshow:
     def update_clock(self):
         self.clock_label.config(text=time.strftime('%H:%M:%S'))
         self.master.after(1000, self.update_clock)
+        
     def exit_app_key(self, event): self.master.destroy()
+    
+    def on_left_click(self, event):
+        width = self.master.winfo_width()
+        height = self.master.winfo_height()
+        zone_width = 50
+        zone_height = 50
+        if event.x >= width - zone_width and event.y <= zone_height:
+            self.master.destroy()
+            # sys.exit(0)
     
 
     
