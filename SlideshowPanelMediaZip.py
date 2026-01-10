@@ -366,6 +366,17 @@ def CV_AdvancedPointillism(img, num_colors=20, dot_radius=None, step=None):
     return canvas
 
 
+def CV_AddBackground(img):
+    h, w = img.shape[:2]
+    ratio = 1920.0 / 1080.0
+    new_w = int(ratio * h)
+    background = np.zeros((h, new_w, 3), dtype=np.uint8)
+    x_offset = (new_w - w) // 2  
+    y_offset = 0                
+    background[y_offset:y_offset + h, x_offset:x_offset + w] = img
+    return background
+
+
 def is_stereo_image(img_stereo, similarity_threshold=0.7):
     img = cv2.cvtColor(img_stereo, cv2.COLOR_BGR2GRAY)
     
@@ -582,7 +593,7 @@ def get_cropped_movie(image):
 
 #------------------------------------------------------------------------------
 
-def view_picture_zoom(image_path):
+def view_picture_zoom(image_path, qAddBackground):
  
     if image_path.lower().endswith(('.avif','.heif')):
         img = cv_load_image_avif(image_path)
@@ -614,6 +625,8 @@ def view_picture_zoom(image_path):
     qErode = False
     qPointillismEffect = False
     qOilPaintingEffect = False
+    qResizeToWindow = False
+    #qAddBackground = False
 
     
     def mouse_callback(event, x, y, flags, param):
@@ -660,6 +673,9 @@ def view_picture_zoom(image_path):
     if qAutoCrop:  
         img = get_cropped_image_num(img, num_type_crop)
         height, width = img.shape[:2]
+        
+        
+    
                                  
     ratio = width / height
     
@@ -669,6 +685,12 @@ def view_picture_zoom(image_path):
         ratio = width / height
         levelAnaglyph = 1
         parallax_offset = 0
+        qAddBackground = False
+        
+    if qAddBackground and not qAnaglyph :
+        img = CV_AddBackground(img)
+        height, width = img.shape[:2]
+        ratio = width / height
          
     lh = 900
     lw = int(lh * ratio)
@@ -700,13 +722,19 @@ def view_picture_zoom(image_path):
     while qLoop:
         if mouse_x == -1 and mouse_y == -1:
             mouse_x, mouse_y = width // 2, height // 2
-                      
+            
         if qAnaglyph and levelAnaglyph==1:
             img2 = CV_Stereo_Anaglyph_Color(img, parallax_offset)
             zoomed_img = get_zoomed_image(img2, zoom_scale, mouse_x, mouse_y)
         else:
-            zoomed_img = get_zoomed_image(img, zoom_scale, mouse_x, mouse_y)
-
+            if qResizeToWindow:
+                img2 = cv2.resize(img, ( int(lh * ratio), lh), interpolation=cv2.INTER_LINEAR)
+                zoomed_img = get_zoomed_image(img2, zoom_scale, mouse_x, mouse_y)
+            else :
+                zoomed_img = get_zoomed_image(img, zoom_scale, mouse_x, mouse_y)
+            
+        
+            
         if qPointillismEffect : zoomed_img = CV_PointillismEffect(zoomed_img, 7, 10) 
         if qOilPaintingEffect : zoomed_img = CV_OilPaintingEffect(zoomed_img, 3, 1)
         
@@ -753,6 +781,7 @@ def view_picture_zoom(image_path):
         elif key == ord('d'): qErode = not qErode
         elif key == ord('p'): qPointillismEffect = not qPointillismEffect
         elif key == ord('o'): qOilPaintingEffect = not qOilPaintingEffect
+        elif key == ord('r'): qResizeToWindow = not qResizeToWindow
         
         elif key == ord('.'): zoom_scale = 1.0
         
@@ -993,7 +1022,7 @@ def view_pdf_zoom(pdf_path, dpi=300):
 
 #------------------------------------------------------------------------------
 
-def play_video_with_seek_and_pause(video_path):
+def play_video_with_seek_and_pause(video_path, qAddBackground):
     zoom_scale = 1.0
     zoom_min = 1.0
     zoom_max = 15.0
@@ -1019,6 +1048,7 @@ def play_video_with_seek_and_pause(video_path):
     qCanny = False
     qDilate = False
     qErode = False
+    #qAddBackground = True
     
     def draw_line_on_image(num_frame, nb_frames,img):
         height, width = img.shape[:2]
@@ -1126,9 +1156,16 @@ def play_video_with_seek_and_pause(video_path):
         ratio = width / height
         parallax_offset = 0
         #cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
+        qAddBackground = False
         
+
     cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
     ret, frame = cap.read()
+    
+    if qAddBackground and not qAnaglyph :
+        frame = CV_AddBackground(frame)
+        height, width = frame.shape[:2]
+        ratio = width / height
     
     window_name = 'Movie Player'
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
@@ -1155,6 +1192,8 @@ def play_video_with_seek_and_pause(video_path):
     
     if height < lh : # Auto qResize
         qResizeToWindow = True
+        
+
 
     while qLoop:
         if not paused:
@@ -1176,9 +1215,12 @@ def play_video_with_seek_and_pause(video_path):
 
         if qAutoCrop:
             frame = get_cropped_movie(frame)
+                        
+        if qAddBackground:
+            frame = CV_AddBackground(frame)
             
         if qResizeToWindow:
-            frame = cv2.resize(frame, (lw, lh), interpolation=cv2.INTER_LINEAR)
+            frame = cv2.resize(frame, (int(lh * ratio), lh), interpolation=cv2.INTER_LINEAR)      
             
 
         if qAnaglyph and levelAnaglyph==1:
@@ -1203,6 +1245,7 @@ def play_video_with_seek_and_pause(video_path):
             
         if qAnaglyph and levelAnaglyph==0:
             zoomed_img = CV_Stereo_Anaglyph_Movie_Color(zoomed_img, qStereoImage, parallax_offset)
+            
             
         if qDrawLineOnImage :
             zoomed_img=draw_line_on_image(current_frame, frame_count, zoomed_img)
@@ -1633,6 +1676,7 @@ class Slideshow:
         self.qcache = qcache
         self.thumbSizeCache = thumbSizeCache
         self.qModeSoftwareView = qModeSoftwareView
+        self.qModeBackground = False
         self.thumb_format = thumb_format.upper()
         self.panel_step = self.panel_cols * self.panel_rows
         self.current_image = 0
@@ -1660,6 +1704,8 @@ class Slideshow:
         self.master.bind("<Right>", lambda e: self.next_image())
         
         self.master.bind("m", self.mode_soft_app_key)
+        
+        self.master.bind("b", self.mode_Background_key)
         
         self.master.bind("<Button-1>", self.on_left_click)
 
@@ -2100,7 +2146,7 @@ class Slideshow:
             elif os.name == 'posix':
                 subprocess.Popen(['xdg-open', video_path])
         else :
-            play_video_with_seek_and_pause(video_path)
+            play_video_with_seek_and_pause(video_path,self.qModeBackground)
             
     def open_with_default_pdf_player(self, pdf_path):
         if self.qModeSoftwareView:
@@ -2122,7 +2168,7 @@ class Slideshow:
             elif os.name == 'posix':
                 subprocess.Popen(['xdg-open', image_path])        
         else :
-            view_picture_zoom(image_path)
+            view_picture_zoom(image_path,self.qModeBackground)
 
         
     def open_with_default_audio_player(self, audio_path):
@@ -2155,7 +2201,10 @@ class Slideshow:
     def on_mouse_wheel_down(self, event): self.next_image()
     
     def mode_soft_app_key(self, event): 
-        self.qModeSoftwareView = not self.qModeSoftwareView   
+        self.qModeSoftwareView = not self.qModeSoftwareView
+        
+    def mode_Background_key(self, event): 
+        self.qModeBackground = not self.qModeBackground
 
     def update_clock(self):
         self.clock_label.config(text=time.strftime('%H:%M:%S'))
