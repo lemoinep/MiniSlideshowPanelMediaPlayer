@@ -384,9 +384,14 @@ def is_stereo_image(img_stereo, similarity_threshold=0.7):
         raise ValueError("Image not found or unsupported file format")
 
     height, width = img.shape
+    ratio = height / width
+    
     if width % 2 != 0:
         return False
         #raise ValueError("The image width must be even")
+        
+    if (ratio > 2.0) :
+        return False
 
     left_img = img[:, :width//2]
     right_img = img[:, width//2:]
