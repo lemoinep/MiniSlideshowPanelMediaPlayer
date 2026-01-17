@@ -112,9 +112,6 @@ def extract_frame_parallel(args):
     img = Image.fromarray(frame_rgb)
     return (frame_idx, img)
 
-
-
-
 def get_cache_directory(video_path):
     video_dir = os.path.dirname(video_path)
     video_name = os.path.splitext(os.path.basename(video_path))[0]
@@ -366,14 +363,25 @@ def CV_AdvancedPointillism(img, num_colors=20, dot_radius=None, step=None):
     return canvas
 
 
-def CV_AddBackground(img):
+def CV_AddBackground(img, bg_color=(0, 0, 0)):
     h, w = img.shape[:2]
+
+    if len(img.shape) == 2 or img.shape[2] == 1:  
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    elif img.shape[2] == 4:  
+        alpha = img[:, :, 3] / 255.0
+        bgr = img[:, :, :3]
+        img = (bgr.astype(float) * alpha[..., np.newaxis] + 
+               np.array(bg_color) * (1 - alpha[..., np.newaxis])).astype(np.uint8)    
     ratio = 1920.0 / 1080.0
     new_w = int(ratio * h)
-    background = np.zeros((h, new_w, 3), dtype=np.uint8)
-    x_offset = (new_w - w) // 2  
-    y_offset = 0                
+    if new_w < w :
+        return img  
+    background = np.full((h, new_w, 3), bg_color, dtype=np.uint8)
+    x_offset = (new_w - w) // 2
+    y_offset = 0
     background[y_offset:y_offset + h, x_offset:x_offset + w] = img
+    
     return background
 
 
