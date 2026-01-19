@@ -394,11 +394,13 @@ def is_stereo_image(img_stereo, similarity_threshold=0.7):
     height, width = img.shape
     ratio = height / width
     
+    #print("ratio="+str(ratio))
+    
     if width % 2 != 0:
         return False
         #raise ValueError("The image width must be even")
         
-    if (ratio > 2.0) :
+    if (ratio > 1.2) :
         return False
 
     left_img = img[:, :width//2]
@@ -1032,6 +1034,135 @@ def view_pdf_zoom(pdf_path, dpi=300):
     cv2.destroyAllWindows()
     time.sleep(500/1000)
     doc.close()
+
+#------------------------------------------------------------------------------
+
+def view_txt_zoom(txt_path, font_scale=0.5, line_height=18, max_width=1600):
+    if not os.path.isfile(txt_path):
+        print(f"File not found : {txt_path}")
+        return
+
+    with open(txt_path, "r", encoding="utf-8", errors="ignore") as f:
+        lines = f.readlines()
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    wrapped_lines = []
+    for line in lines:
+        line = line.rstrip("\n")
+        if not line:
+            wrapped_lines.append("")
+            continue
+        current = ""
+        for word in line.split(" "):
+            test = (current + " " + word).strip()
+            (w, h), _ = cv2.getTextSize(test, font, font_scale, 1)
+            if w > max_width - 40 and current:  
+                wrapped_lines.append(current)
+                current = word
+            else:
+                current = test
+        wrapped_lines.append(current)
+
+    img_height = max(line_height * (len(wrapped_lines) + 2), 400)
+    img_width = max_width
+    img = np.full((img_height, img_width, 3), 255, dtype=np.uint8)
+
+    y = line_height
+    for line in wrapped_lines:
+        if line:
+            cv2.putText(img, line, (20, y), font, font_scale, (0, 0, 0), 1, cv2.LINE_AA)
+        y += line_height
+
+    zoom_scale = 1.0
+    zoom_min = 1.0
+    zoom_max = 15.0
+    mouse_x, mouse_y = -1, -1
+    qLoop = True
+
+    window_name = 'TXT Viewer'
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
+
+    h, w = img.shape[:2]
+    ratio = w / h
+    lh = 900
+    lw = int(lh * ratio)
+    if lw > 1920:
+        lw = 1910
+        lh = int(lw / ratio)
+    cv2.resizeWindow(window_name, lw, lh)
+
+    screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920
+    screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080
+    start_x = int((screen_width - lw) / 2)
+    start_y = int((screen_height - lh) / 2)
+    cv2.moveWindow(window_name, start_x, start_y)
+
+    def get_zoomed_image(image, scale, center_x, center_y):
+        h0, w0 = image.shape[:2]
+        new_w = int(w0 / scale)
+        new_h = int(h0 / scale)
+
+        left = max(center_x - new_w // 2, 0)
+        right = min(center_x + new_w // 2, w0)
+        top = max(center_y - new_h // 2, 0)
+        bottom = min(center_y + new_h // 2, h0)
+
+        if right - left < new_w:
+            if left == 0:
+                right = new_w
+            elif right == w0:
+                left = w0 - new_w
+
+        if bottom - top < new_h:
+            if top == 0:
+                bottom = new_h
+            elif bottom == h0:
+                top = h0 - new_h
+
+        cropped = image[top:bottom, left:right]
+        zoomed = cv2.resize(cropped, (w0, h0), interpolation=cv2.INTER_LINEAR)
+        return zoomed
+
+    def mouse_callback(event, x, y, flags, param):
+        nonlocal zoom_scale, mouse_x, mouse_y, qLoop
+        mouse_x, mouse_y = x, y
+
+        if event == cv2.EVENT_MOUSEWHEEL:
+            if flags < 0:
+                zoom_scale = min(zoom_scale + 0.1, zoom_max)
+            else:
+                zoom_scale = max(zoom_scale - 0.1, zoom_min)
+        if event == cv2.EVENT_RBUTTONDOWN:
+            qLoop = False
+
+    cv2.setMouseCallback(window_name, mouse_callback)
+    time.sleep(10/1000)
+
+    while qLoop:
+        if mouse_x == -1 and mouse_y == -1:
+            mouse_x, mouse_y = w // 2, h // 2
+
+        zoomed_img = get_zoomed_image(img, zoom_scale, mouse_x, mouse_y)
+        cv2.imshow(window_name, zoomed_img)
+
+        key = cv2.waitKey(20) & 0xFF
+        if key == 27:
+            break
+        elif key == ord('.'):
+            zoom_scale = 1.0  
+        elif key == ord('s'):
+            path = Path(txt_path).parent
+            new_path = path / "Screenshot"
+            new_path.mkdir(parents=True, exist_ok=True)
+            date_time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+            outputName = f"TXT_{date_time}.jpg"
+            outputName = new_path / outputName
+            cv2.imwrite(str(outputName), zoomed_img)
+
+    cv2.destroyAllWindows()
+    time.sleep(500/1000)
+
 
 #------------------------------------------------------------------------------
 
