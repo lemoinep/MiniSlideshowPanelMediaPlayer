@@ -452,42 +452,7 @@ def CV_Stereo_Anaglyph_Gray(img_stereo, parallax_offset=0, lim_ratio=2.0):
     return anaglyph
 
 
-def CV_Stereo_Anaglyph_Color(img_stereo, parallax_offset=0):
-    height, width, _ = img_stereo.shape
-
-    ratio = width / height
-
-    if is_stereo_image(img_stereo):
-        img_left = img_stereo[:, :width//2, :]
-        img_right = img_stereo[:, width//2:, :]
-    else:
-        img_left = img_stereo
-        img_right = img_stereo
-        
-    if parallax_offset != 0:
-        M = np.float32([[1, 0, parallax_offset], [0, 1, 0]])
-        img_right = cv2.warpAffine(
-            img_right,
-            M,
-            (img_right.shape[1], img_right.shape[0]),
-            borderMode=cv2.BORDER_REPLICATE
-        )
-
-    min_height = min(img_left.shape[0], img_right.shape[0])
-    min_width = min(img_left.shape[1], img_right.shape[1])
-    img_left = img_left[:min_height, :min_width]
-    img_right = img_right[:min_height, :min_width]
-
-    anaglyph = np.zeros((min_height, min_width, 3), dtype=img_stereo.dtype)
-    anaglyph[:, :, 0] = img_right[:,:,0]   # Blue
-    #anaglyph[:, :, 1] = img_left[:,:,1]    # Green
-    anaglyph[:, :, 1] = img_right[:,:,1]    # Green
-    anaglyph[:, :, 2] = img_left[:,:,2]    # Red
-    
-    return anaglyph
-
-
-def CV_Stereo_Anaglyph_Movie_Color(img_stereo, qStereoImage, parallax_offset=0):
+def CV_Stereo_Anaglyph_Color(img_stereo, qStereoImage, parallax_offset=0):
     height, width, _ = img_stereo.shape
 
     ratio = width / height
@@ -520,6 +485,8 @@ def CV_Stereo_Anaglyph_Movie_Color(img_stereo, qStereoImage, parallax_offset=0):
     anaglyph[:, :, 2] = img_left[:,:,2]    # Red
     
     return anaglyph
+
+
 #------------------------------------------------------------------------------
 
 def is_pixel_down(img, x, y, value):
@@ -634,6 +601,7 @@ def view_picture_zoom(image_path, qAddBackground):
     qEntropy = False
     qAnaglyph = False
     levelAnaglyph = 0
+    qStereoImage = False
     qAutoCrop = False
     qCanny = False
     qDilate = False
@@ -695,6 +663,7 @@ def view_picture_zoom(image_path, qAddBackground):
     ratio = width / height
     
     if is_stereo_image(img):
+        qStereoImage = True
         qAnaglyph = True
         width = width // 2
         ratio = width / height
@@ -739,7 +708,7 @@ def view_picture_zoom(image_path, qAddBackground):
             mouse_x, mouse_y = width // 2, height // 2
             
         if qAnaglyph and levelAnaglyph==1:
-            img2 = CV_Stereo_Anaglyph_Color(img, parallax_offset)
+            img2 = CV_Stereo_Anaglyph_Color(img, qStereoImage, parallax_offset)
             zoomed_img = get_zoomed_image(img2, zoom_scale, mouse_x, mouse_y)
         else:
             if qResizeToWindow:
@@ -766,7 +735,7 @@ def view_picture_zoom(image_path, qAddBackground):
         if qEntropy: zoomed_img = CV_Entropy(zoomed_img)
             
         if qAnaglyph and levelAnaglyph==0:
-            zoomed_img = CV_Stereo_Anaglyph_Color(zoomed_img, parallax_offset)
+            zoomed_img = CV_Stereo_Anaglyph_Color(zoomed_img, qStereoImage, parallax_offset)
             
 
         cv2.imshow(window_name, zoomed_img)
@@ -1368,7 +1337,7 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
             
 
         if qAnaglyph and levelAnaglyph==1:
-            img2 = CV_Stereo_Anaglyph_Movie_Color(frame, qStereoImage, parallax_offset)
+            img2 = CV_Stereo_Anaglyph_Color(frame, qStereoImage, parallax_offset)
             zoomed_img = get_zoomed_image(img2, zoom_scale, mouse_x, mouse_y)
         else:
             zoomed_img = get_zoomed_image(frame, zoom_scale, mouse_x, mouse_y)
@@ -1388,7 +1357,7 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
         if qEntropy: zoomed_img = CV_Entropy(zoomed_img)
             
         if qAnaglyph and levelAnaglyph==0:
-            zoomed_img = CV_Stereo_Anaglyph_Movie_Color(zoomed_img, qStereoImage, parallax_offset)
+            zoomed_img = CV_Stereo_Anaglyph_Color(zoomed_img, qStereoImage, parallax_offset)
             
             
         if qDrawLineOnImage :
