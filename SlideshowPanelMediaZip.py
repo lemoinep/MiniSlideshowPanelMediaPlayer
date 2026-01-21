@@ -32,13 +32,17 @@ from pydub import AudioSegment
 
 from scipy.signal import spectrogram
 
+from markdown_it import MarkdownIt
+from markdown_it.tree import SyntaxTreeNode
+
 register_heif_opener()  # Register HEIF support
 
 VIDEO_EXTENSIONS = ('.mp4', '.webm', '.avi')
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG',".avif",".AVIF",".heif",".HEIF",".bmp",".BMP",".tif",".TIF")
 SOUND_EXTENSIONS = ('.mp3', '.wav')
 PDF_EXTENSIONS = ('.pdf', '.PDF')
-
+TXT_EXTENSIONS = ('.txt', '.TXT')
+MD_EXTENSIONS = ('.md', '.MD')
 
 
 
@@ -1032,14 +1036,17 @@ def view_txt_zoom(txt_path, font_scale=0.5, line_height=18, max_width=1600):
                 current = test
         wrapped_lines.append(current)
 
-    img_height = max(line_height * (len(wrapped_lines) + 2), 400)
-    img_width = max_width
-    img = np.full((img_height, img_width, 3), 255, dtype=np.uint8)
-
-    y = line_height
+    
+    ratio_screen = 1920 / 1080
+    img_height = max(line_height * (len(wrapped_lines) + 4), 1080)
+    #img_width = max_width
+    img_width = int(img_height * ratio_screen)
+    img = np.full((img_height, img_width, 3), 30, dtype=np.uint8)
+    
+    y = int (line_height * 1.5)
     for line in wrapped_lines:
         if line:
-            cv2.putText(img, line, (20, y), font, font_scale, (0, 0, 0), 1, cv2.LINE_AA)
+            cv2.putText(img, line, (20, y), font, font_scale, (255, 255, 255), 1, cv2.LINE_AA)
         y += line_height
 
     zoom_scale = 1.0
@@ -1057,7 +1064,7 @@ def view_txt_zoom(txt_path, font_scale=0.5, line_height=18, max_width=1600):
     lh = 900
     lw = int(lh * ratio)
     if lw > 1920:
-        lw = 1910
+        lw = 1800
         lh = int(lw / ratio)
     cv2.resizeWindow(window_name, lw, lh)
 
@@ -1133,6 +1140,322 @@ def view_txt_zoom(txt_path, font_scale=0.5, line_height=18, max_width=1600):
     time.sleep(500/1000)
 
 
+#------------------------------------------------------------------------------
+
+def view_md_zoom(txt_path, font_scale=0.5, line_height=30, max_width=1900):
+    if not os.path.isfile(txt_path):
+        print(f"File not found : {txt_path}")
+        return
+
+    with open(txt_path, "r", encoding="utf-8", errors="ignore") as f:
+        text = f.read()
+
+    md = MarkdownIt("commonmark")
+    # md = MarkdownIt("commonmark").enable("table").enable("strikethrough")
+    tokens = md.parse(text)
+    root = SyntaxTreeNode(tokens)  
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    blocks = []
+
+    def inline_tokens_to_runs(inline_token):
+        runs = []
+        style_stack = []
+
+        def current_style():
+            return {
+                "bold": "strong" in style_stack,
+                "italic": "em" in style_stack,
+                "code": "code" in style_stack,
+                "link": "link" in style_stack,
+            }
+
+        for t in inline_token.children or []:
+            if t.type in ("strong_open", "em_open", "link_open"):
+                if t.type == "strong_open":
+                    style_stack.append("strong")
+                elif t.type == "em_open":
+                    style_stack.append("em")
+                elif t.type == "link_open":
+                    style_stack.append("link")
+            elif t.type in ("strong_close", "em_close", "link_close"):
+                if t.type == "strong_close" and "strong" in style_stack:
+                    style_stack.remove("strong")
+                elif t.type == "em_close" and "em" in style_stack:
+                    style_stack.remove("em")
+                elif t.type == "link_close" and "link" in style_stack:
+                    style_stack.remove("link")
+            elif t.type == "code_inline":
+                st = current_style()
+                st["code"] = True
+                runs.append((t.content, st))
+            elif t.type == "text":
+                runs.append((t.content, current_style()))
+            elif t.type == "softbreak":
+                runs.append(("\n", current_style()))
+        return runs
+
+    def walk_block(node, indent_level=0):
+        if node.type == "heading":
+            level = int(node.attrs.get("level", 1))
+            for child in node.children:
+                if child.type == "inline":
+                    runs = inline_tokens_to_runs(child.token)
+                    blocks.append({
+                        "type": "heading",
+                        "level": level,
+                        "runs": runs,
+                        "indent": indent_level,
+                    })
+
+        elif node.type == "paragraph":
+            for child in node.children:
+                if child.type == "inline":
+                    runs = inline_tokens_to_runs(child.token)
+                    blocks.append({
+                        "type": "paragraph",
+                        "level": 0,
+                        "runs": runs,
+                        "indent": indent_level,
+                    })
+
+        elif node.type in ("bullet_list", "ordered_list"):
+            for li in node.children:
+                if li.type == "list_item":
+                    for ch in li.children:
+                        if ch.type == "paragraph":
+                            for inl in ch.children:
+                                if inl.type == "inline":
+                                    runs = inline_tokens_to_runs(inl.token)
+                                    blocks.append({
+                                        "type": "list_item",
+                                        "level": 0,
+                                        "runs": runs,
+                                        "indent": indent_level + 1,
+                                    })
+                        else:
+                            walk_block(ch, indent_level + 1)
+
+        elif node.type == "fence" or node.type == "code_block":
+            code_text = node.token.content if node.token else ""
+            runs = [(line, {"bold": False, "italic": False, "code": True, "link": False}) for line in code_text.splitlines()]
+            for r in runs:
+                blocks.append({
+                    "type": "code_block",
+                    "level": 0,
+                    "runs": [r],
+                    "indent": indent_level,
+                })
+
+        else:
+            for child in node.children:
+                walk_block(child, indent_level)
+
+    for child in root.children:
+        walk_block(child, indent_level=0)
+
+
+
+    wrapped_lines = []  
+
+    for blk in blocks:
+        block_type = blk["type"]
+        level = blk["level"]
+        indent = blk["indent"]
+        left_margin = 40 + indent * 50
+
+        words = []  
+        for txt, st in blk["runs"]:
+            parts = txt.split(" ")
+            for i, w in enumerate(parts):
+                if w == "":
+                    continue
+                token = w
+                words.append((token + (" " if i < len(parts) - 1 else ""), st))
+
+        if not words:
+            wrapped_lines.append({"runs": [], "block_type": block_type, "level": level, "indent": indent})
+            continue
+
+        current_runs = []
+        current_width = 0
+
+        for word, st in words:
+            if block_type == "heading":
+                if level == 1:
+                    local_scale = font_scale * 1.3
+                elif level == 2:
+                    local_scale = font_scale * 1.2
+                else:
+                    local_scale = font_scale * 1.1
+            else:
+                local_scale = font_scale
+                if st.get("bold"):
+                    local_scale *= 1.2
+
+            (w_px, _), _ = cv2.getTextSize(word, font, local_scale, 1)
+            if left_margin + current_width + w_px > max_width - 20 and current_runs:
+                wrapped_lines.append({
+                    "runs": current_runs,
+                    "block_type": block_type,
+                    "level": level,
+                    "indent": indent,
+                })
+                current_runs = []
+                current_width = 0
+            current_runs.append((word, st))
+            current_width += w_px
+
+        if current_runs:
+            wrapped_lines.append({
+                "runs": current_runs,
+                "block_type": block_type,
+                "level": level,
+                "indent": indent,
+            })
+
+    if not wrapped_lines:
+        print("Nothing to render in Markdown.")
+        return
+
+    ratio_screen = 1920 / 1080
+    img_height = max(line_height * (len(wrapped_lines) + 4), 1080)
+    #img_width = max_width
+    img_width = int(img_height * ratio_screen)
+    
+    img = np.full((img_height, img_width, 3), 30, dtype=np.uint8)
+    
+    y = int (line_height * 1.5)
+    for line in wrapped_lines:
+        runs = line["runs"]
+        block_type = line["block_type"]
+        level = line["level"]
+        indent = line["indent"]
+        x = 20 + indent * 50
+
+        # bullet 
+        if block_type == "list_item":
+            cv2.circle(img, (x - 10, y - 6), 3, (255, 255, 255), -1)
+
+        for txt, st in runs:
+            if block_type == "heading":
+                if level == 1:
+                    local_scale = font_scale * 1.3
+                elif level == 2:
+                    local_scale = font_scale * 1.2
+                else:
+                    local_scale = font_scale * 1.1
+                color = (250, 240, 240)  
+                thickness = 2
+            elif block_type == "code_block" or st.get("code"):
+                local_scale = font_scale * 0.9
+                color = (60, 60, 60)
+                thickness = 1
+            elif st.get("link"):
+                local_scale = font_scale
+                color = (200, 0, 0)  
+                thickness = 1
+            elif st.get("bold"):
+                local_scale = font_scale * 1.1
+                color = (255, 255, 255)
+                thickness = 1
+            else:
+                local_scale = font_scale
+                color = (255, 255, 255)
+                thickness = 1
+
+            (w_px, _), _ = cv2.getTextSize(txt, font, local_scale, thickness)
+            
+            cv2.putText(img, txt, (x+1, y+1), font, local_scale, (0,0,0), thickness, cv2.LINE_AA)
+            cv2.putText(img, txt, (x, y), font, local_scale, color, thickness, cv2.LINE_AA)
+            x += w_px
+
+        y += line_height
+
+    zoom_scale = 1.0
+    zoom_min = 1.0
+    zoom_max = 15.0
+    mouse_x, mouse_y = -1, -1
+    qLoop = True
+    window_name = 'MD Viewer'
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
+
+    h, w = img.shape[:2]
+    ratio = w / h
+    lh = 900
+    lw = int(lh * ratio)
+    if lw > 1920:
+        lw = 1800
+        lh = int(lw / ratio)
+    cv2.resizeWindow(window_name, lw, lh)
+
+    screen_width = 1920
+    screen_height = 1080
+    start_x = int((screen_width - lw) / 2)
+    start_y = int((screen_height - lh) / 2)
+    cv2.moveWindow(window_name, start_x, start_y)
+
+    def get_zoomed_image(image, scale, cx, cy):
+        h0, w0 = image.shape[:2]
+        new_w = int(w0 / scale)
+        new_h = int(h0 / scale)
+        left = max(cx - new_w // 2, 0)
+        right = min(cx + new_w // 2, w0)
+        top = max(cy - new_h // 2, 0)
+        bottom = min(cy + new_h // 2, h0)
+        if right - left < new_w:
+            if left == 0:
+                right = new_w
+            elif right == w0:
+                left = w0 - new_w
+        if bottom - top < new_h:
+            if top == 0:
+                bottom = new_h
+            elif bottom == h0:
+                top = h0 - new_h
+        cropped = image[top:bottom, left:right]
+        zoomed = cv2.resize(cropped, (w0, h0), interpolation=cv2.INTER_LINEAR)
+        return zoomed
+
+    def mouse_callback(event, x, y, flags, param):
+        nonlocal zoom_scale, mouse_x, mouse_y, qLoop
+        mouse_x, mouse_y = x, y
+        if event == cv2.EVENT_MOUSEWHEEL:
+            if flags < 0:
+                zoom_scale = min(zoom_scale + 0.1, zoom_max)
+            else:
+                zoom_scale = max(zoom_scale - 0.1, zoom_min)
+        if event == cv2.EVENT_RBUTTONDOWN:
+            qLoop = False
+
+    cv2.setMouseCallback(window_name, mouse_callback)
+    time.sleep(10/1000)
+
+    while qLoop:
+        if mouse_x == -1 and mouse_y == -1:
+            mouse_x, mouse_y = w // 2, h // 2
+        zoomed_img = get_zoomed_image(img, zoom_scale, mouse_x, mouse_y)
+        cv2.imshow(window_name, zoomed_img)
+        key = cv2.waitKey(20) & 0xFF
+        if key == 27:
+            break
+        elif key == ord('.'):
+            zoom_scale = 1.0
+        elif key == ord('s'):
+            path = Path(txt_path).parent
+            new_path = path / "Screenshot"
+            new_path.mkdir(parents=True, exist_ok=True)
+            date_time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+            outputName = new_path / f"MD_{date_time}.jpg"
+            cv2.imwrite(str(outputName), zoomed_img)
+
+    cv2.destroyAllWindows()
+    time.sleep(500/1000)
+    
+    
+    
 #------------------------------------------------------------------------------
 
 def play_video_with_seek_and_pause(video_path, qAddBackground):
@@ -1799,6 +2122,9 @@ class Slideshow:
         self.image_refs = []
         PathW = os.path.dirname(sys.argv[0])
         self.audio_placeholder_img = Image.open(PathW + "/audio.jpg")
+        self.txt_placeholder_img = Image.open(PathW + "/TXT.jpg")
+        self.md_placeholder_img = Image.open(PathW + "/MD.jpg")
+        
             
         self.cache_zip_path = None
         if self.qcache:
@@ -1909,7 +2235,7 @@ class Slideshow:
     
     def get_images(self, sort_by='NAME'):
         files = [file for file in os.listdir(self.directory)
-                 if file.lower().endswith(IMAGE_EXTENSIONS + VIDEO_EXTENSIONS + SOUND_EXTENSIONS + PDF_EXTENSIONS)]
+                 if file.lower().endswith(IMAGE_EXTENSIONS + VIDEO_EXTENSIONS + SOUND_EXTENSIONS + PDF_EXTENSIONS + TXT_EXTENSIONS + MD_EXTENSIONS)]
         if sort_by == 'NAME':
             sorted_files = sorted(files)
         elif sort_by == 'DATE':
@@ -2216,6 +2542,37 @@ class Slideshow:
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_audio_length(file_path):.2f} s | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
 
+
+                elif ext in TXT_EXTENSIONS:
+                    img = self.txt_placeholder_img.copy()
+                    ratio = min(Iw / img.width, Ih / img.height)
+                    w, h = int(img.width * ratio), int(img.height * ratio)
+                    img = img.resize((w, h), Image.LANCZOS)
+                    photo_img = ImageTk.PhotoImage(img)
+                    x = x + (max_img_width - w) // 2
+                    y = y + (max_img_height - h) // 2
+                    self.shadow(x, y, w, h)
+                    img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
+                    self.image_refs.append(photo_img)
+                    self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_txt_viewer(path))
+                    self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
+                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_audio_length(file_path):.2f} s | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+
+                elif ext in MD_EXTENSIONS:
+                    img = self.md_placeholder_img.copy()
+                    ratio = min(Iw / img.width, Ih / img.height)
+                    w, h = int(img.width * ratio), int(img.height * ratio)
+                    img = img.resize((w, h), Image.LANCZOS)
+                    photo_img = ImageTk.PhotoImage(img)
+                    x = x + (max_img_width - w) // 2
+                    y = y + (max_img_height - h) // 2
+                    self.shadow(x, y, w, h)
+                    img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
+                    self.image_refs.append(photo_img)
+                    self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_md_viewer(path))
+                    self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
+                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_audio_length(file_path):.2f} s | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+
                 elif ext in PDF_EXTENSIONS:
                     #img = self.get_first_page_from_pdf(file_path)
                     #img = self.get_grid_preview_from_pdf(file_path)      
@@ -2283,7 +2640,6 @@ class Slideshow:
         else :
             view_picture_zoom(image_path,self.qModeBackground)
 
-        
     def open_with_default_audio_player(self, audio_path):
         if self.qModeSoftwareView:
             if sys.platform.startswith('darwin'):
@@ -2294,6 +2650,28 @@ class Slideshow:
                 subprocess.Popen(['xdg-open', audio_path])
         else :
             play_audio_with_seek_and_waveform(audio_path)
+            
+    def open_with_default_txt_viewer(self, txt_path):
+        if self.qModeSoftwareView:
+            if sys.platform.startswith('darwin'):
+                subprocess.Popen(['open', txt_path])
+            elif os.name == 'nt':
+                os.startfile(txt_path)
+            elif os.name == 'posix':
+                subprocess.Popen(['xdg-open', txt_path])
+        else :
+            view_txt_zoom(txt_path)
+            
+    def open_with_default_md_viewer(self, txt_path):
+        if self.qModeSoftwareView:
+            if sys.platform.startswith('darwin'):
+                subprocess.Popen(['open', txt_path])
+            elif os.name == 'nt':
+                os.startfile(txt_path)
+            elif os.name == 'posix':
+                subprocess.Popen(['xdg-open', txt_path])
+        else :
+            view_md_zoom(txt_path)
 
     def next_image(self):
         if self.images:
