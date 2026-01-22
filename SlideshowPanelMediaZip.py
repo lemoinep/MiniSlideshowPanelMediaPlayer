@@ -3,6 +3,7 @@
 # add cache option for movies and pictures in Zip
 
 import tkinter as tk
+from tkinter import scrolledtext
 from PIL import Image, ImageTk
 import os
 import sys
@@ -34,6 +35,7 @@ from scipy.signal import spectrogram
 
 from markdown_it import MarkdownIt
 from markdown_it.tree import SyntaxTreeNode
+from multiprocessing import Process
 
 register_heif_opener()  # Register HEIF support
 
@@ -1008,141 +1010,10 @@ def view_pdf_zoom(pdf_path, dpi=300):
     time.sleep(500/1000)
     doc.close()
 
-#------------------------------------------------------------------------------
-
-def view_txt_zoom(txt_path, font_scale=0.5, line_height=18, max_width=1600):
-    if not os.path.isfile(txt_path):
-        print(f"File not found : {txt_path}")
-        return
-
-    with open(txt_path, "r", encoding="utf-8", errors="ignore") as f:
-        lines = f.readlines()
-
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    wrapped_lines = []
-    for line in lines:
-        line = line.rstrip("\n")
-        if not line:
-            wrapped_lines.append("")
-            continue
-        current = ""
-        for word in line.split(" "):
-            test = (current + " " + word).strip()
-            (w, h), _ = cv2.getTextSize(test, font, font_scale, 1)
-            if w > max_width - 40 and current:  
-                wrapped_lines.append(current)
-                current = word
-            else:
-                current = test
-        wrapped_lines.append(current)
-
-    
-    ratio_screen = 1920 / 1080
-    img_height = max(line_height * (len(wrapped_lines) + 4), 1080)
-    #img_width = max_width
-    img_width = int(img_height * ratio_screen)
-    img = np.full((img_height, img_width, 3), 30, dtype=np.uint8)
-    
-    y = int (line_height * 1.5)
-    for line in wrapped_lines:
-        if line:
-            cv2.putText(img, line, (20, y), font, font_scale, (255, 255, 255), 1, cv2.LINE_AA)
-        y += line_height
-
-    zoom_scale = 1.0
-    zoom_min = 1.0
-    zoom_max = 15.0
-    mouse_x, mouse_y = -1, -1
-    qLoop = True
-
-    window_name = 'TXT Viewer'
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
-
-    h, w = img.shape[:2]
-    ratio = w / h
-    lh = 900
-    lw = int(lh * ratio)
-    if lw > 1920:
-        lw = 1800
-        lh = int(lw / ratio)
-    cv2.resizeWindow(window_name, lw, lh)
-
-    screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920
-    screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080
-    start_x = int((screen_width - lw) / 2)
-    start_y = int((screen_height - lh) / 2)
-    cv2.moveWindow(window_name, start_x, start_y)
-
-    def get_zoomed_image(image, scale, center_x, center_y):
-        h0, w0 = image.shape[:2]
-        new_w = int(w0 / scale)
-        new_h = int(h0 / scale)
-
-        left = max(center_x - new_w // 2, 0)
-        right = min(center_x + new_w // 2, w0)
-        top = max(center_y - new_h // 2, 0)
-        bottom = min(center_y + new_h // 2, h0)
-
-        if right - left < new_w:
-            if left == 0:
-                right = new_w
-            elif right == w0:
-                left = w0 - new_w
-
-        if bottom - top < new_h:
-            if top == 0:
-                bottom = new_h
-            elif bottom == h0:
-                top = h0 - new_h
-
-        cropped = image[top:bottom, left:right]
-        zoomed = cv2.resize(cropped, (w0, h0), interpolation=cv2.INTER_LINEAR)
-        return zoomed
-
-    def mouse_callback(event, x, y, flags, param):
-        nonlocal zoom_scale, mouse_x, mouse_y, qLoop
-        mouse_x, mouse_y = x, y
-
-        if event == cv2.EVENT_MOUSEWHEEL:
-            if flags < 0:
-                zoom_scale = min(zoom_scale + 0.1, zoom_max)
-            else:
-                zoom_scale = max(zoom_scale - 0.1, zoom_min)
-        if event == cv2.EVENT_RBUTTONDOWN:
-            qLoop = False
-
-    cv2.setMouseCallback(window_name, mouse_callback)
-    time.sleep(10/1000)
-
-    while qLoop:
-        if mouse_x == -1 and mouse_y == -1:
-            mouse_x, mouse_y = w // 2, h // 2
-
-        zoomed_img = get_zoomed_image(img, zoom_scale, mouse_x, mouse_y)
-        cv2.imshow(window_name, zoomed_img)
-
-        key = cv2.waitKey(20) & 0xFF
-        if key == 27:
-            break
-        elif key == ord('.'):
-            zoom_scale = 1.0  
-        elif key == ord('s'):
-            path = Path(txt_path).parent
-            new_path = path / "Screenshot"
-            new_path.mkdir(parents=True, exist_ok=True)
-            date_time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-            outputName = f"TXT_{date_time}.jpg"
-            outputName = new_path / outputName
-            cv2.imwrite(str(outputName), zoomed_img)
-
-    cv2.destroyAllWindows()
-    time.sleep(500/1000)
-
 
 #------------------------------------------------------------------------------
 
-def view_md_zoom(txt_path, font_scale=0.5, line_height=30, max_width=1900):
+def view_in_mode_opencv(txt_path, font_scale=0.5, line_height=30, max_width=1900):
     if not os.path.isfile(txt_path):
         print(f"File not found : {txt_path}")
         return
@@ -1454,6 +1325,298 @@ def view_md_zoom(txt_path, font_scale=0.5, line_height=30, max_width=1900):
     cv2.destroyAllWindows()
     time.sleep(500/1000)
     
+    
+#------------------------------------------------------------------------------
+    
+def view_in_mode_txt(txt_path, font_scale=0.5, line_height=18, max_width=1600):
+    
+    import tkinter as tkS
+    if not os.path.isfile(txt_path):
+        print(f"File not found : {txt_path}")
+        return
+
+    with open(txt_path, "r", encoding="utf-8", errors="ignore") as f:
+        text = f.read()
+
+
+    md = MarkdownIt("commonmark").enable("table").enable("strikethrough")
+    tokens = md.parse(text)
+    root = SyntaxTreeNode(tokens)  
+
+
+    root_tkS = tkS.Tk()
+    root_tkS.title(f"Markdown viewer - {os.path.basename(txt_path)}")
+
+    bg_color = "#ffffff"
+    fg_color = "#24292e"
+    code_bg = "#f6f8fa"
+    blockquote_color = "#6a737d"
+    table_border_color = "#d0d7de"
+    link_color = "#0969da"
+      
+    bg_color = "#000000"      # noir
+    fg_color = "#FFFFFF"      # blanc
+    code_bg = "#f6f8fa"
+    blockquote_color = "#6a737d"
+    table_border_color = "#555555"
+    link_color = "#4ea3ff"    # bleu clair lisible sur fond sombre
+    
+    
+    approx_char_width = int(max_width / 8)
+
+    text_widget = scrolledtext.ScrolledText(
+        root_tkS,
+        wrap=tkS.WORD,
+        width=approx_char_width,
+        height=40,
+        bg=bg_color,
+        fg=fg_color,
+        insertbackground=fg_color,
+        borderwidth=0
+    )
+    text_widget.pack(fill=tkS.BOTH, expand=True)
+
+    text_widget.config(state=tkS.NORMAL)
+
+    base_font_size = int(12 * font_scale * 2) or 11
+
+    # Styles
+    text_widget.tag_configure("paragraph", font=("TkDefaultFont", base_font_size))
+    text_widget.tag_configure("bold", font=("TkDefaultFont", base_font_size, "bold"))
+    text_widget.tag_configure("italic", font=("TkDefaultFont", base_font_size, "italic"))
+    text_widget.tag_configure("strike", overstrike=1)
+    text_widget.tag_configure("code", font=("Courier New", base_font_size), background=code_bg)
+    text_widget.tag_configure("link", foreground=link_color, underline=1)
+    text_widget.tag_configure("h1",
+                              font=("TkDefaultFont", int(base_font_size * 1.9), "bold"),
+                              spacing1=10, spacing3=6)
+    text_widget.tag_configure("h2",
+                              font=("TkDefaultFont", int(base_font_size * 1.6), "bold"),
+                              spacing1=8, spacing3=4)
+    text_widget.tag_configure("h3",
+                              font=("TkDefaultFont", int(base_font_size * 1.3), "bold"),
+                              spacing1=6, spacing3=2)
+
+    text_widget.tag_configure("list_item", lmargin1=20, lmargin2=40)
+    text_widget.tag_configure("blockquote",
+                              lmargin1=20,
+                              lmargin2=40,
+                              foreground=blockquote_color)
+    text_widget.tag_configure("table_header",
+                              font=("TkDefaultFont", base_font_size, "bold"))
+    text_widget.tag_configure("table_border",
+                              foreground=table_border_color)
+    text_widget.tag_configure("table_cell",
+                              font=("TkDefaultFont", base_font_size))
+
+    def insert_with_tags(txt, tags):
+        start = text_widget.index(tkS.INSERT)
+        text_widget.insert(tkS.INSERT, txt)
+        end = text_widget.index(tkS.INSERT)
+        for tag in tags:
+            text_widget.tag_add(tag, start, end)
+
+    def inline_tokens_to_segments(inline_token):
+        segments = []
+        style_stack = []
+
+        def current_tags():
+            tags = ["paragraph"]
+            if "strong" in style_stack:
+                tags.append("bold")
+            if "em" in style_stack:
+                tags.append("italic")
+            if "code" in style_stack:
+                tags.append("code")
+            if "link" in style_stack:
+                tags.append("link")
+            if "strike" in style_stack:
+                tags.append("strike")
+            return tags
+
+        for t in inline_token.children or []:
+            if t.type in ("strong_open", "em_open", "link_open", "s_open"):
+                if t.type == "strong_open":
+                    style_stack.append("strong")
+                elif t.type == "em_open":
+                    style_stack.append("em")
+                elif t.type == "link_open":
+                    style_stack.append("link")
+                elif t.type == "s_open":
+                    style_stack.append("strike")
+            elif t.type in ("strong_close", "em_close", "link_close", "s_close"):
+                if t.type == "strong_close" and "strong" in style_stack:
+                    style_stack.remove("strong")
+                elif t.type == "em_close" and "em" in style_stack:
+                    style_stack.remove("em")
+                elif t.type == "link_close" and "link" in style_stack:
+                    style_stack.remove("link")
+                elif t.type == "s_close" and "strike" in style_stack:
+                    style_stack.remove("strike")
+            elif t.type == "code_inline":
+                style_stack.append("code")
+                segments.append((t.content, current_tags()))
+                style_stack.remove("code")
+            elif t.type == "text":
+                segments.append((t.content, current_tags()))
+            elif t.type == "softbreak":
+                segments.append(("\n", current_tags()))
+            elif t.type == "hardbreak":
+                segments.append(("\n", current_tags()))
+        return segments
+
+    def render_table(table_node):
+        rows = []
+        header_row = None
+
+        def collect_row(tr_node):
+            cells = []
+            for cell in tr_node.children:
+                if cell.type in ("th", "td"):
+                    cell_text = ""
+                    for ch in cell.children:
+                        if ch.type == "inline":
+                            segs = inline_tokens_to_segments(ch.token)
+                            cell_text += "".join(s[0] for s in segs)
+                    cells.append(cell_text.strip())
+            return cells
+
+        for child in table_node.children:
+            if child.type == "thead":
+                for tr in child.children:
+                    if tr.type == "tr":
+                        header_row = collect_row(tr)
+            elif child.type == "tbody":
+                for tr in child.children:
+                    if tr.type == "tr":
+                        rows.append(collect_row(tr))
+
+        if header_row is None and rows:
+            header_row = rows[0]
+            rows = rows[1:]
+
+        if not header_row:
+            return
+
+        col_count = len(header_row)
+        widths = [len(h) for h in header_row]
+        for r in rows:
+            for i, c in enumerate(r):
+                if i < col_count:
+                    widths[i] = max(widths[i], len(c))
+
+        def format_row(cells):
+            padded = []
+            for i in range(col_count):
+                txt = cells[i] if i < len(cells) else ""
+                padded.append(" " + txt.ljust(widths[i]) + " ")
+            return "|".join(padded)
+
+        border_line = "+" + "+".join("-" * (w + 2) for w in widths) + "+"
+
+        insert_with_tags(border_line + "\n", ["table_border"])
+        insert_with_tags("|", ["table_border"])
+        for i, cell in enumerate(header_row):
+            cell_text = " " + cell.ljust(widths[i]) + " "
+            insert_with_tags(cell_text, ["table_header", "table_cell"])
+            insert_with_tags("|", ["table_border"])
+        text_widget.insert(tkS.INSERT, "\n")
+
+        insert_with_tags(border_line + "\n", ["table_border"])
+
+        for r in rows:
+            row_text = format_row(r)
+            insert_with_tags("|", ["table_border"])
+            cur_idx = 0
+            for i in range(col_count):
+                cell_content = " " + (r[i] if i < len(r) else "").ljust(widths[i]) + " "
+                insert_with_tags(cell_content, ["table_cell"])
+                insert_with_tags("|", ["table_border"])
+                cur_idx += len(cell_content) + 1
+            text_widget.insert(tkS.INSERT, "\n")
+        insert_with_tags(border_line + "\n\n", ["table_border"])
+
+ 
+    def handle_block(node, indent_level=0):
+        if node.type == "heading":
+            level = int(node.attrs.get("level", 1))
+            tag = "h1" if level == 1 else "h2" if level == 2 else "h3"
+            for child in node.children:
+                if child.type == "inline":
+                    segs = inline_tokens_to_segments(child.token)
+                    for txt, tags in segs:
+                        insert_with_tags(txt, tags + [tag])
+            text_widget.insert(tkS.INSERT, "\n\n")
+
+        elif node.type == "paragraph":
+            for child in node.children:
+                if child.type == "inline":
+                    segs = inline_tokens_to_segments(child.token)
+                    for txt, tags in segs:
+                        insert_with_tags(txt, tags)
+            text_widget.insert(tkS.INSERT, "\n\n")
+
+        elif node.type in ("bullet_list", "ordered_list"):
+            for li in node.children:
+                if li.type == "list_item":
+                    start = text_widget.index(tkS.INSERT)
+                    text_widget.insert(tkS.INSERT, "• ")
+                    text_widget.tag_add("list_item", start, text_widget.index(tk.INSERT))
+                    for ch in li.children:
+                        if ch.type == "paragraph":
+                            for inl in ch.children:
+                                if inl.type == "inline":
+                                    segs = inline_tokens_to_segments(inl.token)
+                                    for txt, tags in segs:
+                                        insert_with_tags(txt, tags + ["list_item"])
+                        else:
+                            handle_block(ch, indent_level + 1)
+                    text_widget.insert(tkS.INSERT, "\n")
+            text_widget.insert(tkS.INSERT, "\n")
+
+        elif node.type in ("fence", "code_block"):
+            code_text = node.token.content if node.token else ""
+            for line in code_text.splitlines():
+                insert_with_tags(line + "\n", ["code"])
+            text_widget.insert(tkS.INSERT, "\n")
+
+        elif node.type == "blockquote":
+            before = text_widget.index(tkS.INSERT)
+            for child in node.children:
+                handle_block(child, indent_level + 1)
+            after = text_widget.index(tkS.INSERT)
+            text_widget.tag_add("blockquote", before, after)
+
+        elif node.type == "table":
+            render_table(node)
+
+        else:
+            for child in node.children:
+                handle_block(child, indent_level)
+
+    for child in root.children:
+        handle_block(child, indent_level=0)
+
+    text_widget.config(state=tkS.DISABLED)
+
+
+    def _on_mousewheel(event):
+        text_widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        return "break"
+        
+    #window_closed = {"done": False}
+
+    def _close_window(event=None):
+       #if not window_closed["done"]:
+           #window_closed["done"] = True
+           root_tkS.destroy()
+           time.sleep(500/1000)
+
+    text_widget.bind("<Button-3>", _close_window)
+    root_tkS.protocol("WM_DELETE_WINDOW", _close_window)
+    #root_tkS.bind("<Escape>", _close_window)    
+    root_tkS.mainloop()
+
     
     
 #------------------------------------------------------------------------------
@@ -2660,7 +2823,8 @@ class Slideshow:
             elif os.name == 'posix':
                 subprocess.Popen(['xdg-open', txt_path])
         else :
-            view_txt_zoom(txt_path)
+            #view_in_mode_opencv(txt_path)
+            view_in_mode_txt(txt_path)
             
     def open_with_default_md_viewer(self, txt_path):
         if self.qModeSoftwareView:
@@ -2671,7 +2835,8 @@ class Slideshow:
             elif os.name == 'posix':
                 subprocess.Popen(['xdg-open', txt_path])
         else :
-            view_md_zoom(txt_path)
+            #view_in_mode_opencv(txt_path)
+            view_in_mode_txt(txt_path)
 
     def next_image(self):
         if self.images:
