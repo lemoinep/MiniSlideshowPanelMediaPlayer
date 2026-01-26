@@ -1649,6 +1649,8 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     qErode = False
     #qAddBackground = True
     
+    disp_w, disp_h = None, None
+    
     def draw_line_on_image(num_frame, nb_frames,img):
         height, width = img.shape[:2]
         ratio = num_frame / nb_frames
@@ -1667,6 +1669,10 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     def mouse_callback(event, x, y, flags, param):
         nonlocal zoom_scale, mouse_x, mouse_y, current_frame, paused, qLoop
         mouse_x, mouse_y = x, y
+        
+        
+        if event == cv2.EVENT_RBUTTONDOWN:
+            qLoop = False
                 
         if event == cv2.EVENT_MOUSEWHEEL:
             if flags < 0:
@@ -1681,17 +1687,21 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
             #cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
             #paused = False
             
-            if mouse_click_inside(mouse_x, mouse_y, 0, 0,  width, int(0.1 *height)):
-                paused = not paused 
-            else :
-                clicked_frame = int((x / width) * frame_count)
+            #if disp_w is None or disp_h is None:
+            #    return
+            
+            if mouse_click_inside(mouse_x, mouse_y, 0, 0, disp_w, int(0.1 * disp_h)):
+                paused = not paused
+            else:
+                # x par rapport à la largeur affichée -> frame vidéo
+                clicked_frame = int((x / disp_w) * frame_count)
                 clicked_frame = max(0, min(clicked_frame, frame_count - 1))
                 current_frame = clicked_frame
                 cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
                 paused = False
+                
             
-        if event == cv2.EVENT_RBUTTONDOWN:
-            qLoop = False
+
             
     
     def get_zoomed_image(image, scale, center_x, center_y):
@@ -1819,7 +1829,8 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
             frame = CV_AddBackground(frame)
             
         if qResizeToWindow:
-            frame = cv2.resize(frame, (int(lh * ratio), lh), interpolation=cv2.INTER_LINEAR)      
+            lw = int(lh * ratio)
+            frame = cv2.resize(frame, (lw, lh), interpolation=cv2.INTER_LINEAR)      
             
 
         if qAnaglyph and levelAnaglyph==1:
@@ -1845,7 +1856,8 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
         if qAnaglyph and levelAnaglyph==0:
             zoomed_img = CV_Stereo_Anaglyph_Color(zoomed_img, qStereoImage, parallax_offset)
             
-            
+        disp_h, disp_w = zoomed_img.shape[:2]
+        
         if qDrawLineOnImage :
             zoomed_img=draw_line_on_image(current_frame, frame_count, zoomed_img)
             
@@ -1896,6 +1908,7 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     cap.release()
     cv2.destroyAllWindows()
     time.sleep(500/1000)
+
 
 #------------------------------------------------------------------------------
 
