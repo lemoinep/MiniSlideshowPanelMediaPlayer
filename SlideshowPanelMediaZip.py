@@ -1759,13 +1759,16 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     
     
     if is_stereo_image(frame):
-        qAnaglyph = True
-        qStereoImage = True
-        width = width // 2
-        ratio = width / height
-        parallax_offset = 0
-        #cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
-        qAddBackground = False
+        cap.set(cv2.CAP_PROP_POS_FRAMES, min (60 * 25, frame_count))
+        ret, frame = cap.read()
+        if is_stereo_image(frame):
+            qAnaglyph = True
+            qStereoImage = True
+            width = width // 2
+            ratio = width / height
+            parallax_offset = 0
+            #cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
+            qAddBackground = False
         
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
