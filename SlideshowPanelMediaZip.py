@@ -39,7 +39,7 @@ from multiprocessing import Process
 
 register_heif_opener()  # Register HEIF support
 
-VIDEO_EXTENSIONS = ('.mp4', '.webm', '.avi')
+VIDEO_EXTENSIONS = ('.mp4', '.webm', '.avi','.mkv')
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG',".avif",".AVIF",".heif",".HEIF",".bmp",".BMP",".tif",".TIF")
 SOUND_EXTENSIONS = ('.mp3', '.wav')
 PDF_EXTENSIONS = ('.pdf', '.PDF')
@@ -528,11 +528,30 @@ def num_type_zone(image):
     lx = 9
     ly = 9
     q1 = is_pixel_down(image, lx, ly, lm) and is_pixel_down(image, w-lx, ly, lm) and is_pixel_down(image, w // 2, ly, lm)
-    q1n = is_pixel_down(image, lx, 200, lm) or is_pixel_down(image,w-lx, 200, lm)
-    q1 = q1 and not q1n
+    
+    q1n = is_pixel_down(image, lx, 200, lm) or is_pixel_down(image,w-lx, 200, lm)  
+    
+    q1u = True
+    q1d = True
+    q1n = False
+    for i in range(1,w, 10):
+        q1u = q1u and is_pixel_down(image, i, 9, lm)
+        q1d = q1d and is_pixel_down(image, i, h -9, lm)
+        q1n = q1n or is_pixel_up(image, i, h//2, lm) 
+              
+    q1 = q1u and q1n
+    if q1u and q1d :
+        q1 = False
+     
+    if (False):
+        print("-------------------------")
+        print("q1u="+str(q1u))      
+        print("q1n="+str(q1n))
+        print("q1d="+str(q1d))
+        print("q1="+str(q1))
+        
     lm = 240
     ly = 31
-    #q2 = is_pixel_up(image, 56, ly, lm) and is_pixel_up(image, 94, ly, lm) and not is_pixel_up(image, 56, ly-10, lm)
     q2 = is_pixel_up(image, 56, ly, lm) and not is_pixel_up(image, 56, ly-10, lm)
     
     ly = 23
@@ -540,7 +559,12 @@ def num_type_zone(image):
     
     q2 = q2 or q3
     
-    return(q1*1+q2*2)
+
+    ly = h - 100
+    lm = 240
+    q4 = is_pixel_up(image, 90, ly, lm) and is_pixel_up(image, 125, ly, lm)
+
+    return(q1*1+q2*2+q4*4)
     
 
 def get_cropped_image_num(image,num):
@@ -557,10 +581,15 @@ def get_cropped_image_num(image,num):
         c_bottom = h
     if (num==2):
         c_top = 35 
-        c_bottom = h -195
+        c_bottom = h -195 * 0
     if (num==3):
         c_top = 35 
+        c_bottom = h -195 * 0
+        
+    if (num==6):
+        c_top = 35 
         c_bottom = h -195
+        
     dest = image[c_top:c_bottom, c_left:c_right]
     return (dest)
 
@@ -1767,8 +1796,8 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
             width = width // 2
             ratio = width / height
             parallax_offset = 0
-            #cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
             qAddBackground = False
+            levelAnaglyph = 1
         
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
@@ -1805,10 +1834,13 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     if height < lh : # Auto qResize
         qResizeToWindow = True
         
-
+    pausedLevel = 0
+    qPostTraitementFrame = True
 
     while qLoop:
         if not paused:
+            qPostTraitementFrame = True
+            pausedLevel=0
             if qLoopVideo and (current_frame>=frame_count-1) :
                 current_frame = 1
                 cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
@@ -1820,20 +1852,27 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
             if mouse_x == -1 or mouse_y == -1:
                 mouse_x, mouse_y = width // 2, height // 2
         else:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
-            ret, frame = cap.read()
-            if not ret:
-                break
+            if pausedLevel==0 :
+                cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                pausedLevel=1
+                qPostTraitementFrame = True
 
-        if qAutoCrop:
-            frame = get_cropped_movie(frame)
-                        
-        if qAddBackground:
-            frame = CV_AddBackground(frame)
+        if qPostTraitementFrame :
+            if qAutoCrop:
+                frame = get_cropped_movie(frame)
+                            
+            if qAddBackground:
+                frame = CV_AddBackground(frame)
+                
+            if qResizeToWindow:
+                lw = int(lh * ratio)
+                frame = cv2.resize(frame, (lw, lh), interpolation=cv2.INTER_LINEAR)      
             
-        if qResizeToWindow:
-            lw = int(lh * ratio)
-            frame = cv2.resize(frame, (lw, lh), interpolation=cv2.INTER_LINEAR)      
+        if pausedLevel==1 : 
+            qPostTraitementFrame = False
             
 
         if qAnaglyph and levelAnaglyph==1:
@@ -1870,13 +1909,19 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
         key = cv2.waitKey(int(1000 / fps)) & 0xFF
         if key == 27:  
             break
-        elif key == ord(' '): paused = not paused
+        elif key == ord(' '): 
+            paused = not paused
+            #pausedLevel = 0
         elif key == ord('2'): fps = fps_movie
         elif key == ord('1'): fps = max ( 1, fps // 2)
         elif key == ord('2'): fps = fps_movie
         elif key == ord('3'): fps = fps * 2
-        elif key == ord('+'): current_frame = current_frame + 1
-        elif key == ord('-'): current_frame = current_frame - 1
+        elif key == ord('+'): 
+            current_frame = current_frame + 1
+            pausedLevel = 0
+        elif key == ord('-'): 
+            current_frame = current_frame - 1
+            pausedLevel = 0
         elif key == ord('s'):
             path = Path(video_path).parent
             new_path = path / "Screenshot"
@@ -2735,7 +2780,7 @@ class Slideshow:
                     self.image_refs.append(photo_img)
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_txt_viewer(path))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
-                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_audio_length(file_path):.2f} s | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
 
                 elif ext in MD_EXTENSIONS:
                     img = self.md_placeholder_img.copy()
@@ -2750,7 +2795,7 @@ class Slideshow:
                     self.image_refs.append(photo_img)
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_md_viewer(path))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
-                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_audio_length(file_path):.2f} s | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
 
                 elif ext in PDF_EXTENSIONS:
                     #img = self.get_first_page_from_pdf(file_path)
