@@ -534,13 +534,25 @@ def num_type_zone(image):
     q1u = True
     q1d = True
     q1n = False
-    for i in range(1,w, 10):
+    for i in range(1, w, 10):
         q1u = q1u and is_pixel_down(image, i, 9, lm)
         q1d = q1d and is_pixel_down(image, i, h -9, lm)
         q1n = q1n or is_pixel_up(image, i, h//2, lm) 
-              
+        
+    q1h = True
+    for j in range(1, h, 10):
+        q1h = q1h and is_pixel_down(image, 9, j, lm)
+        q1h = q1h and is_pixel_down(image, w- 9, j, lm)
+        
     q1 = q1u and q1n
+    
+    if q1u and q1d and q1h :
+        q1 = False
+    
     if q1u and q1d :
+        q1 = False
+        
+    if q1u and q1n and q1h :
         q1 = False
      
     if (False):
@@ -548,6 +560,7 @@ def num_type_zone(image):
         print("q1u="+str(q1u))      
         print("q1n="+str(q1n))
         print("q1d="+str(q1d))
+        print("q1h="+str(q1h))
         print("q1="+str(q1))
         
     lm = 240
