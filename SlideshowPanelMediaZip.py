@@ -292,33 +292,11 @@ def CV_ContourDetection(img):
 
 
 def CV_OilPaintingEffect(img, size=7, dynRatio=1):
-    """
-    Apply oil painting effect to an image.
-
-    Args:
-        img (np.array): Input BGR image.
-        size (int): Neighborhood size for effect.
-        dynRatio (int): Dynamic ratio, higher values increase effect.
-        apply (bool)
-    Returns:
-        np.array: Image with oil painting effect.
-    """
     if not hasattr(cv2, 'xphoto') or not hasattr(cv2.xphoto, 'oilPainting'):
         raise ImportError("OpenCV xphoto module or oilPainting function not available. Install opencv-contrib-python.")
     return cv2.xphoto.oilPainting(img, size, dynRatio)
 
 def CV_PointillismEffect(img, dot_radius=5, step=10):
-    """
-    Apply pointillism effect by drawing colored dots on a white canvas.
-
-    Args:
-        img (np.array): Input BGR image.
-        dot_radius (int): Radius of dots.
-        step (int): Step size between dots.
-        apply (bool)
-    Returns:
-        np.array: Image with pointillism effect.
-    """
     height, width = img.shape[:2]
     canvas = 255 * np.ones_like(img)
     for y in range(0, height, step):
@@ -329,18 +307,6 @@ def CV_PointillismEffect(img, dot_radius=5, step=10):
 
 
 def CV_AdvancedPointillism(img, num_colors=20, dot_radius=None, step=None):
-    """
-    Apply advanced pointillism effect by reducing color palette and jittering dot positions.
-
-    Args:
-        img (np.array): Input BGR image.
-        num_colors (int): Number of colors for palette reduction.
-        dot_radius (int): Dot radius; auto-calculated if None.
-        step (int): Step between dots; auto-calculated if None.
-        apply (bool)
-    Returns:
-        np.array: Image with advanced pointillism effect.
-    """
     h, w = img.shape[:2]
     if dot_radius is None:
         dot_radius = max(3, min(h, w) // 100)
@@ -367,6 +333,72 @@ def CV_AdvancedPointillism(img, num_colors=20, dot_radius=None, step=None):
             cv2.circle(canvas, (cx, cy), dot_radius, color, -1, lineType=cv2.LINE_AA)
 
     return canvas
+
+
+def CV_Interpolate_rect_bilinear(img, x, y, w, h, keep_border=True):
+    img_h, img_w = img.shape[:2]
+    x = max(0, min(x, img_w - 1))
+    y = max(0, min(y, img_h - 1))
+    w = max(1, min(w, img_w - x))
+    h = max(1, min(h, img_h - y))
+
+    roi = img[y:y+h, x:x+w].astype(np.float32)  
+    if w < 2 or h < 2:
+        return img.copy()
+    left = roi[:, 0:1, :]     
+    right = roi[:, -1:, :]     
+    tx = np.linspace(0.0, 1.0, w, dtype=np.float32)  
+    tx = tx.reshape(1, w, 1)  
+    horiz = left * (1.0 - tx) + right * tx
+    top = roi[0:1, :, :]       
+    bottom = roi[-1:, :, :]    
+    ty = np.linspace(0.0, 1.0, h, dtype=np.float32)  
+    ty = ty.reshape(h, 1, 1) 
+    vert = top * (1.0 - ty) + bottom * ty
+    interp = 0.5 * (horiz + vert)
+
+    if keep_border:
+        interp[0, :, :] = roi[0, :, :]
+        interp[-1, :, :] = roi[-1, :, :]
+        interp[:, 0, :] = roi[:, 0, :]
+        interp[:, -1, :] = roi[:, -1, :]
+
+    interp_u8 = np.clip(interp, 0, 255).astype(np.uint8)
+
+    img_out = img.copy()
+    img_out[y:y+h, x:x+w] = interp_u8
+
+    return img_out
+
+
+def CV_Interpolate_rect_region(img, x, y, w, h, method="telea", radius=3.0):
+    img_h, img_w = img.shape[:2]
+    x = max(0, min(x, img_w - 1))
+    y = max(0, min(y, img_h - 1))
+    w = max(1, min(w, img_w - x))
+    h = max(1, min(h, img_h - y))
+
+    roi = img[y:y+h, x:x+w].copy()
+    mask = np.zeros((h, w), dtype=np.uint8)
+    if h > 2 and w > 2:
+        mask[1:h-1, 1:w-1] = 1
+    else:
+        img_corrected = img.copy()
+        return img_corrected
+
+    if method.lower() == "telea":
+        flag = cv2.INPAINT_TELEA
+    elif method.lower() in ("ns", "navier-stokes", "navier_stokes"):
+        flag = cv2.INPAINT_NS
+    else:
+        raise ValueError("method must be 'telea' ou 'ns'.")
+
+    roi_inpaint = cv2.inpaint(roi, mask, radius, flag)
+
+    img_corrected = img.copy()
+    img_corrected[y:y+h, x:x+w] = roi_inpaint
+
+    return img_corrected
 
 
 def CV_AddBackground(img, bg_color=(0, 0, 0)):
@@ -576,7 +608,7 @@ def num_type_zone(image):
     ly = h - 100
     lm = 240
     q4 = is_pixel_up(image, 90, ly, lm) and is_pixel_up(image, 125, ly, lm)
-
+    
     return(q1*1+q2*2+q4*4)
     
 
@@ -605,6 +637,43 @@ def get_cropped_image_num(image,num):
         
     dest = image[c_top:c_bottom, c_left:c_right]
     return (dest)
+
+
+def CV_Erase_zone_circle(image):
+    h, w = image.shape[:2]
+    lm = 250
+    qO1 = False
+    qO2 = is_pixel_up(image, w - 80, 220, lm) # d=100 r=500
+    qO3 = is_pixel_up(image, 75, h - 80, lm) # d=100 r=500
+    qO4 = is_pixel_up(image, w -80 , h - 80, lm) 
+    
+    if (False):
+        print("-------------------------")
+        print("qO1="+str(qO1))
+        print("qO2="+str(qO2))
+        print("qO3="+str(qO3))
+        print("qO4="+str(qO4))
+    
+    qO2 = True
+    if qO2:
+        r = 50
+        x = w - 80 - 2 * r
+        y = 220 -r 
+        image = CV_Interpolate_rect_region(image, x, y, 3 * r, 2 * r, method="telea", radius=9.0)
+    
+    if qO3:
+        r = 50
+        x = 75 - r
+        y = h - 80 -r 
+        image = CV_Interpolate_rect_region(image, x, y, 2 * r, 2 * r, method="telea", radius=9.0)
+    
+    if qO4:
+        r = 50
+        x = w -80 - r
+        y = h - 80 -r 
+        image = CV_Interpolate_rect_region(image, x, y, 2 * r, 2 * r, method="ns", radius=9.0)
+    return (image)
+    
 
 def get_cropped_movie(image):
     h, w = image.shape[:2]
@@ -701,11 +770,15 @@ def view_picture_zoom(image_path, qAddBackground):
     num_type_crop = num_type_zone(img)
     qAutoCrop = (num_type_crop>0)
     
+    
+    if (False): 
+        img = CV_Erase_zone_circle(img)
+    
     if qAutoCrop:  
         img = get_cropped_image_num(img, num_type_crop)
         height, width = img.shape[:2]
-        
-        
+     
+
     
                                  
     ratio = width / height
