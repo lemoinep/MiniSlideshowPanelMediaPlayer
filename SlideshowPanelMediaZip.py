@@ -28,6 +28,16 @@ from tqdm import tqdm
 import shutil
 import zipfile
 
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message="pkg_resources is deprecated as an API.*",
+)
+
+os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
+
 import pygame
 from pydub import AudioSegment
 
@@ -37,7 +47,8 @@ from markdown_it import MarkdownIt
 from markdown_it.tree import SyntaxTreeNode
 from multiprocessing import Process
 
-register_heif_opener()  # Register HEIF support
+register_heif_opener()  
+
 
 VIDEO_EXTENSIONS = ('.mp4', '.webm', '.avi','.mkv')
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.JPG',".avif",".AVIF",".heif",".HEIF",".bmp",".BMP",".tif",".TIF")
@@ -431,13 +442,10 @@ def is_stereo_image(img_stereo, similarity_threshold=0.7):
 
     height, width = img.shape
     ratio = height / width
-    
-    #print("ratio="+str(ratio))
-    
+      
     if width % 2 != 0:
         return False
-        #raise ValueError("The image width must be even")
-        
+     
     if (ratio > 1.2) :
         return False
 
