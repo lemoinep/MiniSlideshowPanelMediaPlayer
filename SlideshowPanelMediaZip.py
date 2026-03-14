@@ -345,6 +345,46 @@ def CV_AdvancedPointillism(img, num_colors=20, dot_radius=None, step=None):
 
     return canvas
 
+def CV_SingleScaleRetinex(img, sigma):
+    blur = cv2.GaussianBlur(img, (0, 0), sigma)
+    retinex = np.log10(img) - np.log10(blur + 1.0)
+    return retinex
+
+def CV_MultiScaleRetinex(img, sigma_list):
+    retinex = np.zeros_like(img)
+    for sigma in sigma_list:
+        retinex += CV_SingleScaleRetinex(img, sigma)
+    retinex /= len(sigma_list)
+    return retinex
+
+def CV_NormalizeRetinex(retinex):
+    out = np.zeros_like(retinex)
+    for c in range(retinex.shape[2]):
+        channel = retinex[:, :, c]
+        out[:, :, c] = cv2.normalize(
+            channel, None, 0, 255, cv2.NORM_MINMAX
+        )
+    return out.astype(np.uint8)
+
+def CV_Retinex(
+    img_bgr,
+    mode="msr",       # "ssr" ou "msr"
+    sigma=80,         # for SSR
+    sigma_list=(15, 80, 250)  # for MSR
+):
+
+    img = img_bgr.astype(np.float32) + 1.0
+
+    if mode.lower() == "ssr":
+        ret = CV_SingleScaleRetinex(img, sigma)
+    elif mode.lower() == "msr":
+        ret = CV_MultiScaleRetinex(img, sigma_list)
+    else:
+        raise ValueError("mode must be 'ssr' or 'msr'")
+
+    ret = CV_NormalizeRetinex(ret)
+    return ret
+
 
 def CV_Interpolate_rect_bilinear(img, x, y, w, h, keep_border=True):
     img_h, img_w = img.shape[:2]
@@ -734,6 +774,8 @@ def view_picture_zoom(image_path, qAddBackground):
     qPointillismEffect = False
     qOilPaintingEffect = False
     qResizeToWindow = False
+    qRetinexSSR = False
+    qRetinexMSR = False
     #qAddBackground = False
 
     
@@ -855,7 +897,11 @@ def view_picture_zoom(image_path, qAddBackground):
         if qErode : zoomed_img = CV_Erode(zoomed_img)
         if qCanny : zoomed_img = CV_Canny(zoomed_img)
         if qClache  : zoomed_img = CV_CLAHE(zoomed_img)
-        if qSharpen : zoomed_img = CV_Sharpen2d(zoomed_img, 0.1, 0.0,  1)       
+        if qSharpen : zoomed_img = CV_Sharpen2d(zoomed_img, 0.1, 0.0,  1)  
+        
+        if qRetinexSSR : zoomed_img = CV_Retinex(zoomed_img , mode="ssr", sigma=80)
+        if qRetinexMSR : zoomed_img = CV_Retinex(zoomed_img, mode="msr", sigma_list=(15, 80, 250))
+
         if qEnhanceColor : zoomed_img = CV_EnhanceColor(zoomed_img)
         if qVibrance : zoomed_img = CV_Vibrance2D(zoomed_img)
         if qBrightnessContrast : zoomed_img = CV_AdjustBrightnessContrast(zoomed_img)
@@ -895,6 +941,9 @@ def view_picture_zoom(image_path, qAddBackground):
         elif key == ord('p'): qPointillismEffect = not qPointillismEffect
         elif key == ord('o'): qOilPaintingEffect = not qOilPaintingEffect
         elif key == ord('r'): qResizeToWindow = not qResizeToWindow
+        
+        elif key == ord('u'): qRetinexSSR = not qRetinexSSR
+        elif key == ord('i'): qRetinexMSR = not qRetinexMSR
         
         elif key == ord('.'): zoom_scale = 1.0
         
