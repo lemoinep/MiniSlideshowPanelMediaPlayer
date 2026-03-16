@@ -28,6 +28,8 @@ from tqdm import tqdm
 import shutil
 import zipfile
 
+import io
+
 import warnings
 
 warnings.filterwarnings(
@@ -1821,7 +1823,12 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     qErode = False
     #qAddBackground = True
     
+    qMadeThumbMovie = False
+    qViewThumbMovie  = False
+    
     disp_w, disp_h = None, None
+    
+
     
     def draw_line_on_image(num_frame, nb_frames,img):
         height, width = img.shape[:2]
@@ -1980,8 +1987,10 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     pausedLevel = 0
     qPostTraitementFrame = True
 
+
     while qLoop:
         if not paused:
+            qViewThumbMovie = False
             qPostTraitementFrame = True
             pausedLevel=0
             if qLoopVideo and (current_frame>=frame_count-1) :
@@ -2046,9 +2055,45 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
         if qDrawLineOnImage :
             zoomed_img=draw_line_on_image(current_frame, frame_count, zoomed_img)
             
-            
-        cv2.imshow('Movie Player', zoomed_img)
+        if not qViewThumbMovie :
+            cv2.imshow('Movie Player', zoomed_img)
+                      
+        if qViewThumbMovie:        
+            video_dir = os.path.dirname(video_path)
+            cache_zip_name = os.path.join(video_dir, "cache_thumbs_movies.zip")
+            thumb_name = os.path.basename(video_path) + ".avif"
         
+            if not qMadeThumbMovie:
+                thumb_movie = None
+        
+                if os.path.exists(cache_zip_name):
+                    with zipfile.ZipFile(cache_zip_name, "r") as zf:
+                        if thumb_name in zf.namelist():
+                            with zf.open(thumb_name, "r") as f:
+                                data = f.read()
+                            buf = io.BytesIO(data)
+                            img = Image.open(buf).convert("RGB")
+                            thumb_movie = np.array(img)
+        
+                if thumb_movie is None:
+                    thumb_movie = sub_get_non_black_frames_composed(video_path, 5*5, lh)
+                    thumb_movie = np.array(thumb_movie)
+                    thumb_movie = cv2.cvtColor(thumb_movie, cv2.COLOR_BGR2RGB)
+        
+                    img = Image.fromarray(thumb_movie)
+                    buf = io.BytesIO()
+                    img.save(buf, format="AVIF")
+                    buf.seek(0)
+        
+                    with zipfile.ZipFile(cache_zip_name, "a", compression=zipfile.ZIP_DEFLATED) as zf:
+                        zf.writestr(thumb_name, buf.read())
+        
+                qMadeThumbMovie = True
+        
+            cv2.imshow("Movie Player", thumb_movie)
+            paused = True
+
+            
         key = cv2.waitKey(int(1000 / fps)) & 0xFF
         if key == 27:  
             break
@@ -2088,6 +2133,10 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
         elif key == ord('d'): qErode = not qErode
         
         elif key == ord('t'): qEntropy = not qEntropy
+        elif key == ord('T'): 
+            qViewThumbMovie = not qViewThumbMovie
+            if qViewThumbMovie:
+                paused = True
         elif key == ord('.'): zoom_scale = 1.
         
         elif key == ord('r'): qResizeToWindow = not qResizeToWindow
@@ -2276,7 +2325,7 @@ def sub_get_first_non_black_frame(video_path, max_frames_to_check=30):
     cap.release()
     return Image.new("RGB", (320, 240), color="black")
 
-def sub_get_non_black_frames_composed(video_path, num_frames=4):
+def sub_get_non_black_frames_composed(video_path, num_frames=4, hSize=540):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         return Image.new("RGB", (320, 240), color="black")
@@ -2309,7 +2358,8 @@ def sub_get_non_black_frames_composed(video_path, num_frames=4):
     for pos, img in zip(positions, frames_resized):
         composed_img.paste(img, pos)
     # resize thumb    
-    h1 = 540
+    #h1 = 540
+    h1 = hSize
     ratio = h1 / h0
     composed_img = composed_img.resize((int(w0 * ratio), int(h0 * ratio)), Image.LANCZOS)
     return composed_img
@@ -2664,7 +2714,7 @@ class Slideshow:
         cap.release()
         return Image.new("RGB", (320, 240), color="black")
 
-    def get_non_black_frames_composed_vers2(self, video_path, num_frames=4):
+    def get_non_black_frames_composed_vers2(self, video_path, num_frames=4,  hSize=540):
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return Image.new("RGB", (320, 240), color="black")
@@ -2697,7 +2747,8 @@ class Slideshow:
         for pos, img in zip(positions, frames_resized):
             composed_img.paste(img, pos)
         # resize thumb    
-        h1 = 540
+        #h1 = 540
+        h1 = hSize
         ratio = h1 / h0
         composed_img = composed_img.resize((int(w0 * ratio), int(h0 * ratio)), Image.LANCZOS)
         return composed_img
