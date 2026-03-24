@@ -860,11 +860,13 @@ def view_picture_zoom(image_path, qAddBackground):
     window_name = 'Picture Zoom'
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1) 
-        
-    cv2.resizeWindow(window_name, lw, lh)
-
+    
     screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
     screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080  
+
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN);    
+        
+    cv2.resizeWindow(window_name, lw, lh)
 
     start_x = int((screen_width - lw) / 2)
     start_y = int((screen_height - lh) / 2)
@@ -978,14 +980,9 @@ def view_pdf_zoom(pdf_path, dpi=300):
     qAdaptativeContrast = False
     
     qResizeToWindow = False
-    
     qDrawLineOnImage = True
-    
     qDilateText = False
     
-    window_name = 'PDF Viewer'
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
     
     def draw_line_on_image(num_frame, nb_frames,img):
         height, width = img.shape[:2]
@@ -1055,8 +1052,14 @@ def view_pdf_zoom(pdf_path, dpi=300):
         if event == cv2.EVENT_LBUTTONDOWN:
             numEventMouse = 1
                  
+    window_name = 'PDF Viewer'
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
 
+    screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
+    screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080   
     
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN);
 
     ratio = width / height
     lh = 900
@@ -1068,9 +1071,6 @@ def view_pdf_zoom(pdf_path, dpi=300):
         
         
     cv2.resizeWindow(window_name, lw, lh)
-    
-    screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
-    screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080  
     
     start_x = int((screen_width - lw) / 2)
     start_y = int((screen_height - lh) / 2)
@@ -1426,6 +1426,11 @@ def view_in_mode_opencv(txt_path, font_scale=0.5, line_height=30, max_width=1900
     window_name = 'MD Viewer'
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
+    
+    screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
+    screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080 
+    
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN);
 
     h, w = img.shape[:2]
     ratio = w / h
@@ -1436,8 +1441,6 @@ def view_in_mode_opencv(txt_path, font_scale=0.5, line_height=30, max_width=1900
         lh = int(lw / ratio)
     cv2.resizeWindow(window_name, lw, lh)
 
-    screen_width = 1920
-    screen_height = 1080
     start_x = int((screen_width - lw) / 2)
     start_y = int((screen_height - lh) / 2)
     cv2.moveWindow(window_name, start_x, start_y)
@@ -1795,13 +1798,122 @@ def view_in_mode_txt(txt_path, font_scale=0.5, line_height=18, max_width=1600):
     
 #------------------------------------------------------------------------------
 
+
+def get_frames_composed_movie(video_path, nbw=3, nbh=3, hSize=540):
+    num_frames = nbw * nbh
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return Image.new("RGB", (320, 240), color="black"), []
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    step = max(total_frames / (num_frames + 1), 1)
+
+    frames_collected = []
+    frame_indices = []
+
+    ret, frame = cap.read()
+    if not ret:
+        cap.release()
+        return Image.new("RGB", (320, 240), color="black"), []
+
+    img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    w0, h0 = img.size
+
+    frame_idx = 0
+    while len(frames_collected) < num_frames and frame_idx < total_frames:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_idx))
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if not sub_is_frame_black(frame):
+            frames_collected.append(
+                Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            )
+            frame_indices.append(int(frame_idx))
+        frame_idx += step
+
+    cap.release()
+
+    while len(frames_collected) < num_frames:
+        if frames_collected:
+            frames_collected.append(frames_collected[-1].copy())
+            frame_indices.append(frame_indices[-1])
+        else:
+            frames_collected.append(Image.new("RGB", (320, 240), "black"))
+            frame_indices.append(-1)  
+
+    size = (w0, h0)
+    frames_resized = [img.resize(size) for img in frames_collected]
+
+    composed_img = Image.new("RGB", (size[0] * nbw, size[1] * nbh))
+    positions = [
+        (x * size[0], y * size[1])
+        for y in range(nbh)
+        for x in range(nbw)
+    ]
+    for pos, im_frame in zip(positions, frames_resized):
+        composed_img.paste(im_frame, pos)
+
+    h1 = hSize
+    ratio = h1 / h0
+    composed_img = composed_img.resize(
+        (int(w0 * ratio), int(h0 * ratio)), Image.LANCZOS
+    )
+
+    return composed_img, frame_indices
+
+
+def designThumbMovie(img, nbw, nbh):
+    lh, lw = img.shape[:2]
+    
+    lh = lh - 1
+    lw = lw - 1
+    
+    px = lw // nbw + 1
+    py = lh // nbh + 1
+    e = 3
+    d = 2
+    color1 = (0,0,0) 
+    color2 = (0,0,255)
+    
+    for i in range(nbw):
+        for j in range(nbh):
+            cv2.line(img,
+                (px * i + d     , py * j + d),
+                (px * (i+1) - d , py * j + d),
+                color2, e)
+                        
+            cv2.line(img,
+                (px * i + d, py * j + d),
+                (px * i + d, py * (j + 1) - d) ,
+                color2, e)
+                        
+            cv2.line(img,
+                (px * i + d + d, py * (j + 1) - d),
+                (px * (i+1) -d , py * (j + 1) - d),
+                color1, e)
+                        
+            cv2.line(img,
+                (px * (i + 1) - d, py * j + d),
+                (px * (i + 1) - d, py * (j + 1) -d),
+                color1, e)
+    return img
+
+def getNumClickThumbGrid(x, y, img, nbFrame, nbw, nbh):
+    lh, lw = img.shape[:2] 
+    px = lw // nbw 
+    py = lh // nbh
+    nx = x // px + 1
+    ny = y // py
+    num =  min(max(0 ,nx + ny * nbw - 1 ), nbw * nbh)
+    return num
+    
 def play_video_with_seek_and_pause(video_path, qAddBackground):
     zoom_scale = 1.0
     zoom_min = 1.0
     zoom_max = 15.0
     mouse_x, mouse_y = -1, -1
     parallax_offset = -8
-    lim_ratio_anaglyph = 2.0
     qLoop = True
     qSharpen = False
     qEnhanceColor = False
@@ -1828,6 +1940,10 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     
     disp_w, disp_h = None, None
     
+    nbtw, nbth = 5, 5
+    
+    nbtw, nbth = 7, 7
+    
 
     
     def draw_line_on_image(num_frame, nb_frames,img):
@@ -1846,7 +1962,7 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
 
     
     def mouse_callback(event, x, y, flags, param):
-        nonlocal zoom_scale, mouse_x, mouse_y, current_frame, paused, qLoop
+        nonlocal zoom_scale, mouse_x, mouse_y, current_frame, paused, qLoop,qViewThumbMovie 
         mouse_x, mouse_y = x, y
         
         
@@ -1860,27 +1976,31 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
                 zoom_scale = max(zoom_scale - 0.1, zoom_min)
                 
         elif event == cv2.EVENT_LBUTTONDOWN:
-            #clicked_frame = int((x / width) * frame_count)
-            #clicked_frame = max(0, min(clicked_frame, frame_count - 1))
-            #current_frame = clicked_frame
-            #cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
-            #paused = False
-            
-            #if disp_w is None or disp_h is None:
-            #    return
-            
-            if mouse_click_inside(mouse_x, mouse_y, 0, 0, disp_w, int(0.1 * disp_h)):
-                paused = not paused
-            else:
-                # x par rapport à la largeur affichée -> frame vidéo
-                clicked_frame = int((x / disp_w) * frame_count)
-                clicked_frame = max(0, min(clicked_frame, frame_count - 1))
-                current_frame = clicked_frame
-                cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
-                paused = False
-                
-            
 
+            if qViewThumbMovie:      
+                   id = getNumClickThumbGrid(mouse_x, mouse_y, thumb_movie, frame_count - 1, nbtw, nbth)
+                   clicked_frame = frame_indices[id]
+                   
+                   clicked_frame = max(0, min(clicked_frame, frame_count - 1))
+                   current_frame = clicked_frame
+                   cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+                   paused = False
+                   
+            if mouse_click_inside(mouse_x, mouse_y, 0, 0, int(0.1 * disp_w), int(0.1 * disp_h)):
+                qViewThumbMovie = True
+                paused = True
+            
+            if not qViewThumbMovie:
+                if mouse_click_inside(mouse_x, mouse_y, 0, 0, disp_w, int(0.1 * disp_h)):
+                    paused = not paused
+                else:                
+                    clicked_frame = int((x / disp_w) * frame_count)
+                    clicked_frame = max(0, min(clicked_frame, frame_count - 1))
+                    current_frame = clicked_frame
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)   
+                    paused = False
+                
+        
             
     
     def get_zoomed_image(image, scale, center_x, center_y):
@@ -1962,6 +2082,11 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
     
+    screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
+    screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080 
+    
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN);
+    
     lh = 900
     lw = int(lh * ratio)
     
@@ -1971,9 +2096,6 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     
     cv2.resizeWindow(window_name, lw, lh)
     
-    screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
-    screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080  
-
     start_x = int((screen_width - lw) / 2)
     start_y = int((screen_height - lh) / 2)
         
@@ -2061,8 +2183,10 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
         if qViewThumbMovie:        
             video_dir = os.path.dirname(video_path)
             cache_zip_name = os.path.join(video_dir, "cache_thumbs_movies.zip")
-            thumb_name = os.path.basename(video_path) + ".avif"
-        
+            thumb_name = os.path.basename(video_path) +"_"+ str(nbtw) + "_" + str(nbth)+".avif"
+            thumb_name_index = os.path.basename(video_path) +"_"+ str(nbtw) + "_" + str(nbth) + ".json"
+            
+            
             if not qMadeThumbMovie:
                 thumb_movie = None
         
@@ -2074,9 +2198,15 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
                             buf = io.BytesIO(data)
                             img = Image.open(buf).convert("RGB")
                             thumb_movie = np.array(img)
+                        
+                        if thumb_name_index in zf.namelist():
+                            with zf.open(thumb_name_index, "r") as f_indices:
+                                data_indices = f_indices.read()
+                            frame_indices_str = data_indices.decode('utf-8')
+                            frame_indices = json.loads(frame_indices_str)
         
                 if thumb_movie is None:
-                    thumb_movie = sub_get_non_black_frames_composed(video_path, 5*5, lh)
+                    thumb_movie, frame_indices = get_frames_composed_movie(video_path, nbtw, nbth, lh)
                     thumb_movie = np.array(thumb_movie)
                     thumb_movie = cv2.cvtColor(thumb_movie, cv2.COLOR_BGR2RGB)
         
@@ -2084,9 +2214,18 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
                     buf = io.BytesIO()
                     img.save(buf, format="AVIF")
                     buf.seek(0)
+                    
+                    frame_indices_json = json.dumps(frame_indices)
+                    buf_indices = io.BytesIO()
+                    buf_indices.write(frame_indices_json.encode('utf-8'))
+                    buf_indices.seek(0)
         
                     with zipfile.ZipFile(cache_zip_name, "a", compression=zipfile.ZIP_DEFLATED) as zf:
                         zf.writestr(thumb_name, buf.read())
+                        zf.writestr(thumb_name_index, buf_indices.read())
+                      
+                
+                thumb_movie = designThumbMovie(thumb_movie, nbtw, nbth)
         
                 qMadeThumbMovie = True
         
@@ -2215,17 +2354,18 @@ def play_audio_with_seek_and_waveform(audio_path):
     window_name = "Audio Player"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
-    cv2.resizeWindow(window_name, width, height)
-    
     
     screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
-    screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080  
-
+    screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080      
+    
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN);
+    
+    cv2.resizeWindow(window_name, width, height)
+    
     start_x = int((screen_width - width) / 2)
     start_y = int((screen_height - height) / 2)
     cv2.moveWindow(window_name, start_x, start_y)
     
-
     qLoop = True
     paused = False
     current_time = 0.0  
@@ -2673,17 +2813,15 @@ class Slideshow:
 
     def make_video_thumb(self, video_path):
         if self.mode == 0:
-            return self.get_first_non_black_frame(video_path, 120)
+            return sub_get_first_non_black_frame(video_path, 120)
         elif self.mode == 1:
-            return self.get_4_non_black_frames_composed_vers1(video_path, 1000)
+            return sub_get_first_non_black_frame(video_path, 120)
         elif self.mode == 2:
-            return self.get_non_black_frames_composed_vers2(video_path, 4)
+            return sub_get_non_black_frames_composed(video_path, 4)
         elif self.mode == 3:
-            return self.get_non_black_frames_composed_vers2(video_path, 9)
-        elif self.mode == 5:
-            return self.get_non_black_frames_composed_parallel(video_path, 9, self.workers)
+            return sub_get_non_black_frames_composed(video_path, 9)
         else:
-            return self.get_first_non_black_frame(video_path, 120)
+            return sub_get_first_non_black_frame(video_path, 120)
         
     def make_pdf_thumb(self, file_path):
         img = self.get_grid_preview_from_pdf(file_path)
@@ -2693,121 +2831,9 @@ class Slideshow:
         img = img.resize((w, h), Image.LANCZOS)
         return (img)
 
-
     def is_frame_black(self, frame, threshold=20):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         return np.mean(gray) < threshold
-
-    def get_first_non_black_frame(self, video_path, max_frames_to_check=30):
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            return Image.new("RGB", (320, 240), color="black")
-        frame_number = 0
-        while frame_number < max_frames_to_check:
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                break
-            if not self.is_frame_black(frame, 50):
-                cap.release()
-                return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            frame_number += 1
-        cap.release()
-        return Image.new("RGB", (320, 240), color="black")
-
-    def get_non_black_frames_composed_vers2(self, video_path, num_frames=4,  hSize=540):
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            return Image.new("RGB", (320, 240), color="black")
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        step = max(total_frames / (num_frames + 1), 1)
-        frames_collected = []
-        ret, frame = cap.read()
-        if not ret:
-            cap.release()
-            return Image.new("RGB", (320, 240), color="black")
-        img = Image.fromarray(frame)
-        w0, h0 = img.size
-        frame_idx = 0
-        while len(frames_collected) < num_frames and frame_idx < total_frames:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_idx))
-            ret, frame = cap.read()
-            if not ret:
-                break
-            if not self.is_frame_black(frame):
-                frames_collected.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
-            frame_idx += step
-        cap.release()
-        while len(frames_collected) < num_frames:
-            frames_collected.append(frames_collected[-1].copy() if frames_collected else Image.new("RGB", (320, 240), "black"))
-        size = (w0, h0)
-        frames_resized = [img.resize(size) for img in frames_collected]
-        grid_size = int(math.sqrt(num_frames))
-        composed_img = Image.new("RGB", (size[0]*grid_size, size[1]*grid_size))
-        positions = [(x*size[0], y*size[1]) for y in range(grid_size) for x in range(grid_size)]
-        for pos, img in zip(positions, frames_resized):
-            composed_img.paste(img, pos)
-        # resize thumb    
-        #h1 = 540
-        h1 = hSize
-        ratio = h1 / h0
-        composed_img = composed_img.resize((int(w0 * ratio), int(h0 * ratio)), Image.LANCZOS)
-        return composed_img
-
-    def get_non_black_frames_composed_parallel(self, video_path, num_frames=4, max_workers=4):
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            return Image.new("RGB", (320, 240), color="black")
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap.release()
-        step = max(total_frames / (num_frames + 1), 1)
-        frame_indices = [int(step * (i + 1)) for i in range(num_frames)]
-        params = [(video_path, idx) for idx in frame_indices]
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            results = sorted(executor.map(extract_frame_parallel, params), key=lambda x: x[0])
-        frames_collected = [img for idx, img in results if img is not None]
-        if not frames_collected:
-            frames_collected = [Image.new("RGB", (320, 240), "black") for _ in range(num_frames)]
-        while len(frames_collected) < num_frames:
-            frames_collected.append(frames_collected[-1].copy())
-        size = frames_collected[0].size
-        frames_resized = [img.resize(size) for img in frames_collected]
-        grid_size = int(math.sqrt(num_frames))
-        composed_img = Image.new("RGB", (size[0]*grid_size, size[1]*grid_size))
-        positions = [(x*size[0], y*size[1]) for y in range(grid_size) for x in range(grid_size)]
-        for pos, img in zip(positions, frames_resized):
-            composed_img.paste(img, pos)
-        return composed_img
-
-    def get_4_non_black_frames_composed_vers1(self, video_path, max_frames_to_check=200):
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            return Image.new("RGB", (320, 240), "black")
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        step = max(total_frames // max_frames_to_check, 1)
-        frames_collected = []
-        frame_idx = 0
-        ret, frame = cap.read()
-        img = Image.fromarray(frame)
-        w0, h0 = img.size
-        read_frames = 0
-        while len(frames_collected) < 4 and read_frames < max_frames_to_check:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            if frame_idx % step == 0 and not self.is_frame_black(frame):
-                frames_collected.append(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
-            frame_idx += 1
-            read_frames += 1
-        cap.release()
-        while len(frames_collected) < 4:
-            frames_collected.append(frames_collected[-1].copy() if frames_collected else Image.new("RGB", (320, 240), "black"))
-        size = (w0, h0)
-        frames_resized = [img.resize(size) for img in frames_collected]
-        composed_img = Image.new("RGB", (size[0]*2, size[1]*2))
-        positions = [(0,0), (size[0],0), (0,size[1]), (size[0],size[1])]
-        for pos, img in zip(positions, frames_resized):
-            composed_img.paste(img, pos)
-        return composed_img
 
     def get_video_duration(self, video_path):
         cap = cv2.VideoCapture(video_path)
@@ -2991,11 +3017,8 @@ class Slideshow:
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
 
-                elif ext in PDF_EXTENSIONS:
-                    #img = self.get_first_page_from_pdf(file_path)
-                    #img = self.get_grid_preview_from_pdf(file_path)      
-                    img = self.get_cached_or_generate_pdf_thumb(file_path)
-                        
+                elif ext in PDF_EXTENSIONS:    
+                    img = self.get_cached_or_generate_pdf_thumb(file_path)     
                     ratio = min(Iw / img.width, Ih / img.height)
                     w, h = int(img.width * ratio), int(img.height * ratio)
                     img = img.resize((w, h), Image.LANCZOS)
