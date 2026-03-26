@@ -32,6 +32,8 @@ import io
 
 import warnings
 
+from typing import Tuple
+
 warnings.filterwarnings(
     "ignore",
     category=UserWarning,
@@ -1862,41 +1864,69 @@ def get_frames_composed_movie(video_path, nbw=3, nbh=3, hSize=540):
 
     return composed_img, frame_indices
 
-
-def designThumbMovie(img, nbw, nbh):
-    lh, lw = img.shape[:2]
-    
-    lh = lh - 1
-    lw = lw - 1
-    
-    px = lw // nbw + 1
-    py = lh // nbh + 1
-    e = 3
-    d = 2
-    color1 = (0,0,0) 
-    color2 = (0,0,255)
-    
+def _draw_grid(
+    img,
+    nbw: int,
+    nbh: int,
+    px: int,
+    py: int,
+    thickness: int,
+    margin: int,
+    color_top_left: Tuple[int, int, int],
+    color_bottom_right: Tuple[int, int, int],
+):
     for i in range(nbw):
         for j in range(nbh):
-            cv2.line(img,
-                (px * i + d     , py * j + d),
-                (px * (i+1) - d , py * j + d),
-                color2, e)
-                        
-            cv2.line(img,
-                (px * i + d, py * j + d),
-                (px * i + d, py * (j + 1) - d) ,
-                color2, e)
-                        
-            cv2.line(img,
-                (px * i + d + d, py * (j + 1) - d),
-                (px * (i+1) -d , py * (j + 1) - d),
-                color1, e)
-                        
-            cv2.line(img,
-                (px * (i + 1) - d, py * j + d),
-                (px * (i + 1) - d, py * (j + 1) -d),
-                color1, e)
+            x0 = px * i + margin
+            x1 = px * (i + 1) - margin
+            y0 = py * j + margin
+            y1 = py * (j + 1) - margin
+
+            cv2.line(img, (x0, y0), (x1, y0), color_top_left, thickness)
+            cv2.line(img, (x0, y0), (x0, y1), color_top_left, thickness)
+            cv2.line(img, (x0 + margin, y1), (x1, y1), color_bottom_right, thickness)
+            cv2.line(img, (x1, y0), (x1, y1), color_bottom_right, thickness)
+
+
+def designThumbMovie(img, nbw: int, nbh: int):
+    lh, lw = img.shape[:2]
+
+    px = lw // nbw + 1
+    py = lh // nbh
+    if nbh == 7:
+        py += 1
+
+    _draw_grid(
+        img=img,
+        nbw=nbw,
+        nbh=nbh,
+        px=px,
+        py=py,
+        thickness=2,
+        margin=1,
+        color_top_left=(100, 100, 100),
+        color_bottom_right=(100, 100, 100),
+    )
+
+    _draw_grid(
+        img=img,
+        nbw=nbw,
+        nbh=nbh,
+        px=px,
+        py=py,
+        thickness=2,
+        margin=3,
+        color_top_left=(0, 0, 255),
+        color_bottom_right=(0, 0, 0),
+    )
+
+    border_thickness = 2
+    border_color = (0, 0, 0)
+
+    cv2.line(img, (0, lh - 1), (lw - 1, lh - 1), border_color, border_thickness)
+    cv2.line(img, (lw - 1, 0), (lw - 1, lh - 1), border_color, border_thickness)
+    cv2.line(img, (0, 0), (lw - 1, 0), border_color, border_thickness)
+    cv2.line(img, (0, 0), (0, lh - 1), border_color, border_thickness)
     return img
 
 def getNumClickThumbGrid(x, y, img, nbFrame, nbw, nbh):
@@ -1937,15 +1967,14 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     
     qMadeThumbMovie = False
     qViewThumbMovie  = False
+    qViewDesignThumb = True
     
     disp_w, disp_h = None, None
     
+    nbtnum = 1
     nbtw, nbth = 5, 5
-    
-    nbtw, nbth = 7, 7
-    
 
-    
+        
     def draw_line_on_image(num_frame, nb_frames,img):
         height, width = img.shape[:2]
         ratio = num_frame / nb_frames
@@ -1962,7 +1991,7 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
 
     
     def mouse_callback(event, x, y, flags, param):
-        nonlocal zoom_scale, mouse_x, mouse_y, current_frame, paused, qLoop,qViewThumbMovie 
+        nonlocal zoom_scale, mouse_x, mouse_y, current_frame, paused, qLoop,qViewThumbMovie,qMadeThumbMovie,nbtnum
         mouse_x, mouse_y = x, y
         
         
@@ -1974,6 +2003,14 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
                 zoom_scale = min(zoom_scale + 0.1, zoom_max)
             else:
                 zoom_scale = max(zoom_scale - 0.1, zoom_min)
+             
+            if qViewThumbMovie:    
+                if flags < 0 :  nbtnum = nbtnum + 1
+                else :  nbtnum = nbtnum - 1
+                nbtnum = max(1,min(nbtnum,3))
+                qViewThumbMovie = True
+                qMadeThumbMovie = False
+                zoom_scale = 1
                 
         elif event == cv2.EVENT_LBUTTONDOWN:
 
@@ -2180,12 +2217,15 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
         if not qViewThumbMovie :
             cv2.imshow('Movie Player', zoomed_img)
                       
-        if qViewThumbMovie:        
+        if qViewThumbMovie:
+            if nbtnum == 1 : nbtw, nbth = 5, 5
+            if nbtnum == 2 : nbtw, nbth = 7, 7
+            if nbtnum == 3 : nbtw, nbth = 9, 9
+            
             video_dir = os.path.dirname(video_path)
             cache_zip_name = os.path.join(video_dir, "cache_thumbs_movies.zip")
             thumb_name = os.path.basename(video_path) +"_"+ str(nbtw) + "_" + str(nbth)+".avif"
             thumb_name_index = os.path.basename(video_path) +"_"+ str(nbtw) + "_" + str(nbth) + ".json"
-            
             
             if not qMadeThumbMovie:
                 thumb_movie = None
@@ -2224,8 +2264,8 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
                         zf.writestr(thumb_name, buf.read())
                         zf.writestr(thumb_name_index, buf_indices.read())
                       
-                
-                thumb_movie = designThumbMovie(thumb_movie, nbtw, nbth)
+                if qViewDesignThumb :
+                    thumb_movie = designThumbMovie(thumb_movie, nbtw, nbth)
         
                 qMadeThumbMovie = True
         
@@ -2283,6 +2323,7 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
         elif key == ord('n'): qAnaglyph = not qAnaglyph
         elif key == ord('4'): parallax_offset = parallax_offset - 1
         elif key == ord('6'): parallax_offset = parallax_offset + 1
+        
                     
     cap.release()
     cv2.destroyAllWindows()
