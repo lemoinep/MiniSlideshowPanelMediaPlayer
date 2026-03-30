@@ -1803,36 +1803,50 @@ def view_in_mode_txt(txt_path, font_scale=0.5, line_height=18, max_width=1600):
 
 def get_frames_composed_movie(video_path, nbw=3, nbh=3, hSize=540):
     num_frames = nbw * nbh
+
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         return Image.new("RGB", (320, 240), color="black"), []
 
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    step = max(total_frames / (num_frames + 1), 1)
-
-    frames_collected = []
-    frame_indices = []
+    if total_frames <= 0:
+        cap.release()
+        return Image.new("RGB", (320, 240), color="black"), []
 
     ret, frame = cap.read()
     if not ret:
         cap.release()
         return Image.new("RGB", (320, 240), color="black"), []
 
-    img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    w0, h0 = img.size
+    img0 = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    w0, h0 = img0.size
 
-    frame_idx = 0
-    while len(frames_collected) < num_frames and frame_idx < total_frames:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_idx))
+    h_thumb = max(hSize // nbh, 1)
+    ratio = h_thumb / h0
+    w_thumb = max(int(w0 * ratio), 1)
+
+    grid_width = w_thumb * nbw
+    grid_height = h_thumb * nbh
+
+    step = max(total_frames / (num_frames + 1), 1)
+    target_indices = [int(step * (i + 1)) for i in range(num_frames)]
+
+    frames_collected = []
+    frame_indices = []
+
+    for idx in target_indices:
+        if idx >= total_frames:
+            break
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
         ret, frame = cap.read()
         if not ret:
             break
+
         if not sub_is_frame_black(frame):
-            frames_collected.append(
-                Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            )
-            frame_indices.append(int(frame_idx))
-        frame_idx += step
+            img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            img = img.resize((w_thumb, h_thumb), Image.BILINEAR)
+            frames_collected.append(img)
+            frame_indices.append(idx)
 
     cap.release()
 
@@ -1841,28 +1855,25 @@ def get_frames_composed_movie(video_path, nbw=3, nbh=3, hSize=540):
             frames_collected.append(frames_collected[-1].copy())
             frame_indices.append(frame_indices[-1])
         else:
-            frames_collected.append(Image.new("RGB", (320, 240), "black"))
-            frame_indices.append(-1)  
+            black = Image.new("RGB", (w_thumb, h_thumb), "black")
+            frames_collected.append(black)
+            frame_indices.append(-1)
 
-    size = (w0, h0)
-    frames_resized = [img.resize(size) for img in frames_collected]
+    frames_collected = frames_collected[:num_frames]
+    frame_indices = frame_indices[:num_frames]
 
-    composed_img = Image.new("RGB", (size[0] * nbw, size[1] * nbh))
+    composed_img = Image.new("RGB", (grid_width, grid_height))
+
     positions = [
-        (x * size[0], y * size[1])
+        (x * w_thumb, y * h_thumb)
         for y in range(nbh)
         for x in range(nbw)
     ]
-    for pos, im_frame in zip(positions, frames_resized):
+    for pos, im_frame in zip(positions, frames_collected):
         composed_img.paste(im_frame, pos)
 
-    h1 = hSize
-    ratio = h1 / h0
-    composed_img = composed_img.resize(
-        (int(w0 * ratio), int(h0 * ratio)), Image.LANCZOS
-    )
-
     return composed_img, frame_indices
+
 
 def _draw_grid(
     img,
@@ -1891,10 +1902,8 @@ def _draw_grid(
 def designThumbMovie(img, nbw: int, nbh: int):
     lh, lw = img.shape[:2]
 
-    px = lw // nbw + 1
+    px = lw // nbw
     py = lh // nbh
-    if nbh == 7:
-        py += 1
 
     _draw_grid(
         img=img,
@@ -1914,7 +1923,7 @@ def designThumbMovie(img, nbw: int, nbh: int):
         nbh=nbh,
         px=px,
         py=py,
-        thickness=2,
+        thickness=1,
         margin=3,
         color_top_left=(0, 0, 255),
         color_bottom_right=(0, 0, 0),
@@ -2352,8 +2361,12 @@ def play_audio_with_seek_and_waveform(audio_path):
     sr = audio_seg.frame_rate
 
     width = 1800
+    #h_wave = 450
+    #h_spec = 450
+    
     h_wave = 450
-    h_spec = 450
+    h_spec = 900 - h_wave
+    
     height = h_wave + h_spec
 
     wave_img = np.zeros((h_wave, width, 3), dtype=np.uint8)
@@ -3026,7 +3039,9 @@ class Slideshow:
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_audio_player(path))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_audio_length(file_path):.2f} s | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
-
+                    base_name = os.path.splitext(os.path.basename(file_path))[0]
+                    self.canvas.create_text(x+w//2+2, y+h//2+50+2, text=f"{base_name}", fill="black", font=("Helvetica", max(10, w//30), "bold"))
+                    self.canvas.create_text(x+w//2, y+h//2+50, text=f"{base_name}", fill="white", font=("Helvetica", max(10, w//30), "bold"))
 
                 elif ext in TXT_EXTENSIONS:
                     img = self.txt_placeholder_img.copy()
@@ -3042,6 +3057,9 @@ class Slideshow:
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_txt_viewer(path))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    base_name = os.path.splitext(os.path.basename(file_path))[0]
+                    self.canvas.create_text(x+w//2+2, y+h//2+50+2, text=f"{base_name}", fill="black", font=("Helvetica", max(10, w//30), "bold"))
+                    self.canvas.create_text(x+w//2, y+h//2+50, text=f"{base_name}", fill="white", font=("Helvetica", max(10, w//30), "bold"))
 
                 elif ext in MD_EXTENSIONS:
                     img = self.md_placeholder_img.copy()
@@ -3057,6 +3075,9 @@ class Slideshow:
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_md_viewer(path))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    base_name = os.path.splitext(os.path.basename(file_path))[0]
+                    self.canvas.create_text(x+w//2+2, y+h//2+50+2, text=f"{base_name}", fill="black", font=("Helvetica", max(10, w//30), "bold"))
+                    self.canvas.create_text(x+w//2, y+h//2+50, text=f"{base_name}", fill="white", font=("Helvetica", max(10, w//30), "bold"))
 
                 elif ext in PDF_EXTENSIONS:    
                     img = self.get_cached_or_generate_pdf_thumb(file_path)     
