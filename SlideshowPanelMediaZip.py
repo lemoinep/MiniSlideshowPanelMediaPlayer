@@ -758,7 +758,7 @@ def view_picture_zoom(image_path, qAddBackground):
     mouse_x, mouse_y = -1, -1
     height, width = img.shape[:2]
     parallax_offset = -8
-    lim_ratio_anaglyph = 2.0
+
     qLoop = True
     qSharpen = False
     qEnhanceColor = False
@@ -780,7 +780,10 @@ def view_picture_zoom(image_path, qAddBackground):
     qResizeToWindow = False
     qRetinexSSR = False
     qRetinexMSR = False
-    #qAddBackground = False
+
+    qFlipH = False
+    qFlipV = False
+
 
     
     def mouse_callback(event, x, y, flags, param):
@@ -914,6 +917,9 @@ def view_picture_zoom(image_path, qAddBackground):
         if qAdaptativeContrast : zoomed_img = CV_AdaptativeContrast(zoomed_img)
         if qSaliency : zoomed_img = CV_SaliencyAddWeighted(zoomed_img)
         if qEntropy: zoomed_img = CV_Entropy(zoomed_img)
+        
+        if qFlipH : zoomed_img = cv2.flip(zoomed_img, 0)
+        if qFlipV : zoomed_img = cv2.flip(zoomed_img, 1)
             
         if qAnaglyph and levelAnaglyph==0:
             zoomed_img = CV_Stereo_Anaglyph_Color(zoomed_img, qStereoImage, parallax_offset)
@@ -933,6 +939,15 @@ def view_picture_zoom(image_path, qAddBackground):
             outputName = f"{outputName}_{date_time}.jpg"
             outputName = Path(new_path) / outputName
             cv2.imwrite(outputName, zoomed_img)
+            
+        elif key == ord('S'):
+            path = Path(image_path).parent
+            new_path = path / "Screenshot"
+            new_path .mkdir(parents=True, exist_ok=True)
+            outputName = os.path.basename(image_path)
+            outputName = Path(new_path) / outputName
+            cv2.imwrite(outputName, zoomed_img)
+        
         elif key == ord('x'): qSharpen = not qSharpen
         elif key == ord('e'): qEnhanceColor = not qEnhanceColor
         elif key == ord('v'): qVibrance = not qVibrance
@@ -956,6 +971,9 @@ def view_picture_zoom(image_path, qAddBackground):
         elif key == ord('n'): qAnaglyph = not qAnaglyph
         elif key == ord('4'): parallax_offset = parallax_offset - 1
         elif key == ord('6'): parallax_offset = parallax_offset + 1
+        
+        elif key == ord('7'): qFlipH = not qFlipH
+        elif key == ord('9'): qFlipV = not qFlipV
         
     cv2.destroyAllWindows()
     time.sleep(500/1000)
@@ -1982,6 +2000,9 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     
     nbtnum = 1
     nbtw, nbth = 5, 5
+    
+    qFlipH = False
+    qFlipV = False
 
         
     def draw_line_on_image(num_frame, nb_frames,img):
@@ -2214,6 +2235,9 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
         if qSaliency : zoomed_img = CV_SaliencyAddWeighted(zoomed_img)
             
         if qEntropy: zoomed_img = CV_Entropy(zoomed_img)
+        
+        if qFlipH : zoomed_img = cv2.flip(zoomed_img, 0)
+        if qFlipV : zoomed_img = cv2.flip(zoomed_img, 1)
             
         if qAnaglyph and levelAnaglyph==0:
             zoomed_img = CV_Stereo_Anaglyph_Color(zoomed_img, qStereoImage, parallax_offset)
@@ -2298,6 +2322,7 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
         elif key == ord('-'): 
             current_frame = current_frame - 1
             pausedLevel = 0
+            
         elif key == ord('s'):
             path = Path(video_path).parent
             new_path = path / "Screenshot"
@@ -2307,6 +2332,20 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
             outputName = f"{outputName}_{date_time}.jpg"
             outputName = Path(new_path) / outputName
             cv2.imwrite(outputName, zoomed_img)
+            
+        elif key == ord('S'):
+            path = Path(video_path).parent
+            new_path = path / "Screenshot"
+            new_path .mkdir(parents=True, exist_ok=True)
+            
+            base_name = os.path.basename(video_path)
+            name, ext = os.path.splitext(base_name)
+            outputName = name
+            date_time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")     
+            outputName = f"{outputName}_{date_time}.jpg"
+            outputName = Path(new_path) / outputName
+            cv2.imwrite(outputName, zoomed_img)
+            
         elif key == ord('x'): qSharpen = not qSharpen
         elif key == ord('e'): qEnhanceColor = not qEnhanceColor
         elif key == ord('v'): qVibrance = not qVibrance    
@@ -2332,6 +2371,9 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
         elif key == ord('n'): qAnaglyph = not qAnaglyph
         elif key == ord('4'): parallax_offset = parallax_offset - 1
         elif key == ord('6'): parallax_offset = parallax_offset + 1
+        
+        elif key == ord('7'): qFlipH = not qFlipH
+        elif key == ord('9'): qFlipV = not qFlipV
         
                     
     cap.release()
@@ -3022,6 +3064,7 @@ class Slideshow:
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
                     self.image_refs.append(photo_img)
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_player(path))
+                    self.canvas.create_text(x+w//2, y+h//2+2, text="▶", fill="black", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_video_duration(file_path)}  |  {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
 
@@ -3037,6 +3080,7 @@ class Slideshow:
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
                     self.image_refs.append(photo_img)
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_audio_player(path))
+                    self.canvas.create_text(x+w//2, y+h//2+2, text="▶", fill="black", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_audio_length(file_path):.2f} s | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
                     base_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -3055,6 +3099,7 @@ class Slideshow:
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
                     self.image_refs.append(photo_img)
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_txt_viewer(path))
+                    self.canvas.create_text(x+w//2, y+h//2+2, text="▶", fill="black", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
                     base_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -3073,6 +3118,7 @@ class Slideshow:
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
                     self.image_refs.append(photo_img)
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_md_viewer(path))
+                    self.canvas.create_text(x+w//2, y+h//2+2, text="▶", fill="black", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
                     base_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -3091,8 +3137,12 @@ class Slideshow:
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
                     self.image_refs.append(photo_img)
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_pdf_player(path))
+                    self.canvas.create_text(x+w//2, y+h//2+2, text="▶", fill="black", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_pdf_page_count(file_path)} Pg | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    base_name = os.path.splitext(os.path.basename(file_path))[0]
+                    self.canvas.create_text(x+w//2+2, y+h//2+50+2, text=f"{base_name}", fill="black", font=("Helvetica", max(10, w//30), "bold"))
+                    self.canvas.create_text(x+w//2, y+h//2+50, text=f"{base_name}", fill="white", font=("Helvetica", max(10, w//30), "bold"))
 
                 else:
                     img = self.get_cached_or_generate_picture_thumb(file_path)
