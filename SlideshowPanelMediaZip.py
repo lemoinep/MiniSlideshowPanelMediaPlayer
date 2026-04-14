@@ -478,6 +478,33 @@ def CV_AddBackground(img, bg_color=(0, 0, 0)):
     return background
 
 
+def CV_PasteImage(large_img, small_img, x, y):
+    if large_img is None or small_img is None:
+        raise ValueError("Images must not be None.")
+
+    H, W = large_img.shape[:2]
+    h, w = small_img.shape[:2]
+
+    if x < 0 or y < 0 or x + w > W or y + h > H:
+        raise ValueError("The small image exceeds the boundaries of the large image.")
+
+    result = large_img.copy()
+
+    # Case with transparency (alpha channel)
+    if small_img.shape[2] == 4:
+        overlay = small_img[:, :, :3].astype(np.float32)
+        alpha = small_img[:, :, 3].astype(np.float32) / 255.0
+        alpha = alpha[:, :, np.newaxis]
+
+        region = result[y:y+h, x:x+w].astype(np.float32)
+        blended = alpha * overlay + (1 - alpha) * region
+        result[y:y+h, x:x+w] = blended.astype(np.uint8)
+    else:
+        result[y:y+h, x:x+w] = small_img
+
+    return result
+
+
 def is_stereo_image(img_stereo, similarity_threshold=0.7):
     img = cv2.cvtColor(img_stereo, cv2.COLOR_BGR2GRAY)
     
@@ -743,6 +770,119 @@ def get_cropped_movie(image):
     return (dest)
 
 #------------------------------------------------------------------------------
+
+
+def CropImage(path_in):
+
+    img = cv2.imread(path_in)
+    if img is None:
+        print("Error: unable to load the image:", path_in)
+        return
+
+    clone = img.copy()
+    rect_start = None
+    rect_end = None
+    drawing = False 
+    qLoop  = True
+
+
+    def mouse_callback(event, x, y, flags, param):
+        nonlocal img, rect_start, rect_end, drawing, qLoop 
+
+        if event == cv2.EVENT_LBUTTONDOWN:
+            drawing = True
+            rect_start = (x, y)
+            rect_end = (x, y)
+
+        elif event == cv2.EVENT_MOUSEMOVE and drawing:
+            rect_end = (x, y)
+            img = clone.copy()
+            cv2.rectangle(img, rect_start, rect_end, (0, 0, 255), 3)
+
+        elif event == cv2.EVENT_LBUTTONUP:
+            drawing = False
+            rect_end = (x, y)
+            img = clone.copy()
+            cv2.rectangle(img, rect_start, rect_end, (0, 0, 255), 3)
+            
+        if event == cv2.EVENT_RBUTTONDOWN:
+            qLoop = False
+    
+    
+    
+    height, width = img.shape[:2]
+    ratio = width / height
+    
+    lh = 900
+    lw = int(lh * ratio)
+    
+    if lw > 1920:
+        lw = 1910
+        lh = int(lw / ratio)
+        
+        
+    window_name = 'CropImage'
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1) 
+    
+    screen_width = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1920  
+    screen_height = cv2.getWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN) or 1080  
+
+    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN);    
+        
+    cv2.resizeWindow(window_name, lw, lh)
+
+    start_x = int((screen_width - lw) / 2)
+    start_y = int((screen_height - lh) / 2)
+    cv2.moveWindow(window_name, start_x, start_y)
+    
+    
+    cv2.setMouseCallback(window_name, mouse_callback)
+
+    while qLoop:
+        cv2.imshow(window_name, img)
+        key = cv2.waitKey(1) & 0xFF
+        if key in (ord('s'), ord('S')):
+            if rect_start is not None and rect_end is not None:
+                x1, y1 = rect_start
+                x2, y2 = rect_end
+
+                x_min, x_max = sorted([x1, x2])
+                y_min, y_max = sorted([y1, y2])
+
+                if x_max > x_min and y_max > y_min:
+                    crop = clone[y_min:y_max, x_min:x_max] 
+                    
+                    if key == ord('s'):
+                        path = Path(path_in).parent
+                        new_path = path / "Screenshot"
+                        new_path .mkdir(parents=True, exist_ok=True)
+                        date_time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+                        outputName = "Crop"
+                        outputName = f"{outputName}_{date_time}.jpg"
+                        outputName = Path(new_path) / outputName
+                        cv2.imwrite(outputName, crop) 
+                        print("Cropped image saved to:", outputName)
+                        
+                    if key == ord('S'):
+                        path = Path(path_in).parent
+                        new_path = path / "Screenshot"
+                        new_path .mkdir(parents=True, exist_ok=True)
+                        outputName = os.path.basename(path_in)
+                        outputName = Path(new_path) / outputName
+                        cv2.imwrite(outputName, crop) 
+                        print("Cropped image saved to:", outputName)
+                    
+                else:
+                    print("Invalid rectangle, no cropping applied.")
+            else:
+                print("No area selected.")
+
+        if key == 27:
+            break
+
+    cv2.destroyWindow(window_name)
+
 
 def view_picture_zoom(image_path, qAddBackground):
  
