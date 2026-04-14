@@ -773,17 +773,22 @@ def get_cropped_movie(image):
 
 
 def CropImage(path_in):
+    
+    if path_in.lower().endswith(('.avif','.heif')):
+        img = cv_load_image_avif(path_in)
+    else:    
+        img = cv2.imread(path_in)
 
-    img = cv2.imread(path_in)
     if img is None:
         print("Error: unable to load the image:", path_in)
         return
-
+    
     clone = img.copy()
     rect_start = None
     rect_end = None
     drawing = False 
     qLoop  = True
+    qAutoCrop = False
 
 
     def mouse_callback(event, x, y, flags, param):
@@ -808,6 +813,18 @@ def CropImage(path_in):
         if event == cv2.EVENT_RBUTTONDOWN:
             qLoop = False
     
+    
+    num_type_crop = num_type_zone(img)
+    qAutoCrop = (num_type_crop>0)
+    
+    
+    if (False): 
+        img = CV_Erase_zone_circle(img)
+    
+    if qAutoCrop:  
+        img = get_cropped_image_num(img, num_type_crop)
+        height, width = img.shape[:2]
+        
     
     
     height, width = img.shape[:2]
@@ -882,6 +899,7 @@ def CropImage(path_in):
             break
 
     cv2.destroyWindow(window_name)
+    time.sleep(500/1000)
 
 
 def view_picture_zoom(image_path, qAddBackground):
@@ -1114,6 +1132,8 @@ def view_picture_zoom(image_path, qAddBackground):
         
         elif key == ord('7'): qFlipH = not qFlipH
         elif key == ord('9'): qFlipV = not qFlipV
+        
+        elif key == ord('C'): CropImage(image_path)
         
     cv2.destroyAllWindows()
     time.sleep(500/1000)
