@@ -28,6 +28,8 @@ from tqdm import tqdm
 import shutil
 import zipfile
 
+import pyautogui
+
 import io
 
 import warnings
@@ -772,25 +774,26 @@ def get_cropped_movie(image):
 #------------------------------------------------------------------------------
 
 
-def CropImage(path_in):
+def CropImage(path_in, img = None):
     
-    if path_in.lower().endswith(('.avif','.heif')):
-        img = cv_load_image_avif(path_in)
-    else:    
-        img = cv2.imread(path_in)
+    if img is None:
+        if path_in.lower().endswith(('.avif','.heif')):
+            img = cv_load_image_avif(path_in)
+        else:    
+            img = cv2.imread(path_in)
 
     if img is None:
         print("Error: unable to load the image:", path_in)
         return
     
-    clone = img.copy()
     rect_start = None
     rect_end = None
     drawing = False 
     qLoop  = True
     qAutoCrop = False
-
-
+    
+    original_mouse_pos = pyautogui.position()
+    
     def mouse_callback(event, x, y, flags, param):
         nonlocal img, rect_start, rect_end, drawing, qLoop 
 
@@ -825,7 +828,7 @@ def CropImage(path_in):
         img = get_cropped_image_num(img, num_type_crop)
         height, width = img.shape[:2]
         
-    
+    clone = img.copy()
     
     height, width = img.shape[:2]
     ratio = width / height
@@ -899,6 +902,7 @@ def CropImage(path_in):
             break
 
     cv2.destroyWindow(window_name)
+    pyautogui.moveTo(original_mouse_pos.x, original_mouse_pos.y)
     time.sleep(500/1000)
 
 
@@ -941,8 +945,7 @@ def view_picture_zoom(image_path, qAddBackground):
 
     qFlipH = False
     qFlipV = False
-
-
+    
     
     def mouse_callback(event, x, y, flags, param):
         nonlocal zoom_scale, mouse_x, mouse_y, qLoop 
@@ -1133,7 +1136,8 @@ def view_picture_zoom(image_path, qAddBackground):
         elif key == ord('7'): qFlipH = not qFlipH
         elif key == ord('9'): qFlipV = not qFlipV
         
-        elif key == ord('C'): CropImage(image_path)
+        elif key == ord('C'): CropImage(image_path, zoomed_img)
+        #elif key == ord('C'): CropImage(image_path)
         
     cv2.destroyAllWindows()
     time.sleep(500/1000)
@@ -2534,6 +2538,8 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
         
         elif key == ord('7'): qFlipH = not qFlipH
         elif key == ord('9'): qFlipV = not qFlipV
+        
+        elif key == ord('C'): CropImage(video_path,zoomed_img)
         
                     
     cap.release()
