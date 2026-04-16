@@ -27,7 +27,7 @@ from io import BytesIO
 from tqdm import tqdm
 import shutil
 import zipfile
-
+import tempfile
 import pyautogui
 
 import io
@@ -137,7 +137,7 @@ def extract_frame_parallel(args):
 
 def get_cache_directory(video_path):
     video_dir = os.path.dirname(video_path)
-    video_name = os.path.splitext(os.path.basename(video_path))[0]
+    #video_name = os.path.splitext(os.path.basename(video_path))[0]
     cache_name = "cache"
     cache_dir = os.path.join(video_dir, cache_name)
     return cache_dir
@@ -167,18 +167,25 @@ def has_cache_config_changed(cache_dir, cols, rows, mode, thumb_format):
     return (config.get('cols') != cols or config.get('rows') != rows or config.get('mode') != mode
             or config.get('thumb_format') != thumb_format)
 
-def extract_frame_parallel(args):
-    video_path, frame_idx = args
-    cap = cv2.VideoCapture(video_path)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-    ret, frame = cap.read()
-    cap.release()
-    if not ret:
-        return (frame_idx, None)
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    img = Image.fromarray(frame_rgb)
-    return (frame_idx, img)
+def replace_image_in_zip(zip_path, image_name, crop, ext=".jpg"):
+    ok, buf = cv2.imencode(ext, crop)
+    if not ok:
+        raise RuntimeError("Image encoding failed !!!")
 
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+    os.close(tmp_fd)
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zin, zipfile.ZipFile(tmp_path, "w") as zout:
+            for item in zin.infolist():
+                if item.filename != image_name:
+                    zout.writestr(item, zin.read(item.filename))
+            zout.writestr(image_name, buf.tobytes())
+
+        os.replace(tmp_path, zip_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 def cv_save_image_to_avif(img, output_path, quality=80):
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -574,7 +581,7 @@ def CV_Stereo_Anaglyph_Gray(img_stereo, parallax_offset=0, lim_ratio=2.0):
 def CV_Stereo_Anaglyph_Color(img_stereo, qStereoImage, parallax_offset=0):
     height, width, _ = img_stereo.shape
 
-    ratio = width / height
+    #ratio = width / height
 
     if qStereoImage:
         img_left = img_stereo[:, :width//2, :]
@@ -892,6 +899,14 @@ def CropImage(path_in, img = None):
                         outputName = Path(new_path) / outputName
                         cv2.imwrite(outputName, crop) 
                         print("Cropped image saved to:", outputName)
+                      
+                    radius = 9    
+                    dp1 = 6
+                    cv2.circle(img, (width - radius - dp1 + 1, radius + dp1 + 1), radius ,(0,0,0), -1)
+                    cv2.circle(img, (width - radius - dp1, radius + dp1), radius ,(0,0,255), -1)  
+                    cv2.imshow(window_name, img)
+                    cv2.waitKey(1000)
+                    img = clone.copy()
                     
                 else:
                     print("Invalid rectangle, no cropping applied.")
@@ -2289,16 +2304,19 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     
     
     if is_stereo_image(frame):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, min (60 * 25, frame_count))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, min (60 * 25, frame_count-1))
         ret, frame = cap.read()
         if is_stereo_image(frame):
-            qAnaglyph = True
-            qStereoImage = True
-            width = width // 2
-            ratio = width / height
-            parallax_offset = 0
-            qAddBackground = False
-            levelAnaglyph = 1
+            cap.set(cv2.CAP_PROP_POS_FRAMES, min (2 * 60 * 25, frame_count-1))
+            ret, frame = cap.read()
+            if is_stereo_image(frame):
+                qAnaglyph = True
+                qStereoImage = True
+                width = width // 2
+                ratio = width / height
+                parallax_offset = 0
+                qAddBackground = False
+                levelAnaglyph = 1
         
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, 1)
