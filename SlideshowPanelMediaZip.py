@@ -167,32 +167,39 @@ def has_cache_config_changed(cache_dir, cols, rows, mode, thumb_format):
     return (config.get('cols') != cols or config.get('rows') != rows or config.get('mode') != mode
             or config.get('thumb_format') != thumb_format)
 
-def replace_image_in_zip(zip_path, image_name, crop, ext=".jpg"):
-    ok, buf = cv2.imencode(ext, crop)
-    if not ok:
-        raise RuntimeError("Image encoding failed !!!")
 
-    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".zip")
-    os.close(tmp_fd)
-
+def replace_image_in_zip(zip_path, image_name, crop):
     try:
+        crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(crop)
+        buf = io.BytesIO()
+        img.save(buf, format="AVIF")
+        buf.seek(0)
+
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+        os.close(tmp_fd)
+
         with zipfile.ZipFile(zip_path, "r") as zin, zipfile.ZipFile(tmp_path, "w") as zout:
             for item in zin.infolist():
                 if item.filename != image_name:
                     zout.writestr(item, zin.read(item.filename))
-            zout.writestr(image_name, buf.tobytes())
+                else:
+                    zout.writestr(image_name, buf.getvalue())
 
         os.replace(tmp_path, zip_path)
+    except Exception as e:
+        print(f"Une erreur s'est produite : {e}")
     finally:
         if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+            os.unlink(tmp_path) 
 
-def cv_save_image_to_avif(img, output_path, quality=80):
+
+def CV_Save_image_to_avif(img, output_path, quality=80):
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(img_rgb)
     pil_img.save(output_path, 'AVIF', quality=quality)
 
-def cv_load_image_avif(path):
+def CV_Load_image_avif(path):
     pil_img = Image.open(path).convert("RGB")
     img_np = np.array(pil_img)
     img_cv = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
@@ -783,9 +790,10 @@ def get_cropped_movie(image):
 
 def CropImage(path_in, img = None):
     
+    numState = 0
     if img is None:
         if path_in.lower().endswith(('.avif','.heif')):
-            img = cv_load_image_avif(path_in)
+            img = CV_Load_image_avif(path_in)
         else:    
             img = cv2.imread(path_in)
 
@@ -869,7 +877,7 @@ def CropImage(path_in, img = None):
     while qLoop:
         cv2.imshow(window_name, img)
         key = cv2.waitKey(1) & 0xFF
-        if key in (ord('s'), ord('S')):
+        if key in (ord('s'), ord('S'), ord('T')):
             if rect_start is not None and rect_end is not None:
                 x1, y1 = rect_start
                 x2, y2 = rect_end
@@ -890,6 +898,7 @@ def CropImage(path_in, img = None):
                         outputName = Path(new_path) / outputName
                         cv2.imwrite(outputName, crop) 
                         print("Cropped image saved to:", outputName)
+                        numState = 1
                         
                     if key == ord('S'):
                         path = Path(path_in).parent
@@ -899,6 +908,26 @@ def CropImage(path_in, img = None):
                         outputName = Path(new_path) / outputName
                         cv2.imwrite(outputName, crop) 
                         print("Cropped image saved to:", outputName)
+                        numState = 1
+                        
+                    if key == ord('T'):
+                        if path_in.lower().endswith(IMAGE_EXTENSIONS):
+                            path = Path(path_in).parent
+                            outputName = os.path.basename(path_in)
+                            outputName = Path(path) / outputName
+                            cv2.imwrite(outputName, crop) 
+                            print("Cropped image saved to:", outputName)
+                            
+                            # Update Thumb in Zip
+                            height2, width2 = crop.shape[:2]
+                            Lh = 540
+                            ratio2 = Lh / height2        
+                            w2, h2 = int(width2 * ratio2), Lh                        
+                            imgThumb2 = cv2.resize(crop, (w2, h2), interpolation=cv2.INTER_LINEAR)                                       
+                            base_name2 = os.path.basename(path_in)
+                            fileZipCache = os.path.join(path, "cache_thumbs.zip")
+                            replace_image_in_zip(fileZipCache, base_name2+".avif", imgThumb2)
+                            numState = 3
                       
                     radius = 9    
                     dp1 = 6
@@ -915,16 +944,20 @@ def CropImage(path_in, img = None):
 
         if key == 27:
             break
+        
+        if numState == 3:
+            break
 
     cv2.destroyWindow(window_name)
     pyautogui.moveTo(original_mouse_pos.x, original_mouse_pos.y)
     time.sleep(500/1000)
+    return numState
 
 
 def view_picture_zoom(image_path, qAddBackground):
  
     if image_path.lower().endswith(('.avif','.heif')):
-        img = cv_load_image_avif(image_path)
+        img = CV_Load_image_avif(image_path)
     else:    
         img = cv2.imread(image_path)
     
@@ -935,6 +968,8 @@ def view_picture_zoom(image_path, qAddBackground):
     mouse_x, mouse_y = -1, -1
     height, width = img.shape[:2]
     parallax_offset = -8
+    
+    numState = 0
 
     qLoop = True
     qSharpen = False
@@ -1151,8 +1186,10 @@ def view_picture_zoom(image_path, qAddBackground):
         elif key == ord('7'): qFlipH = not qFlipH
         elif key == ord('9'): qFlipV = not qFlipV
         
-        elif key == ord('C'): CropImage(image_path, zoomed_img)
-        #elif key == ord('C'): CropImage(image_path)
+        elif key == ord('C'): numState = CropImage(image_path, zoomed_img)
+        
+        if numState == 3:
+            break
         
     cv2.destroyAllWindows()
     time.sleep(500/1000)
@@ -3376,6 +3413,8 @@ class Slideshow:
                 subprocess.Popen(['xdg-open', image_path])        
         else :
             view_picture_zoom(image_path,self.qModeBackground)
+            # Key T
+            self.show_image()
 
     def open_with_default_audio_player(self, audio_path):
         if self.qModeSoftwareView:
