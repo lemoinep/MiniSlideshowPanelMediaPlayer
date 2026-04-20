@@ -168,6 +168,7 @@ def has_cache_config_changed(cache_dir, cols, rows, mode, thumb_format):
             or config.get('thumb_format') != thumb_format)
 
 
+ 
 def replace_image_in_zip(zip_path, image_name, crop):
     try:
         crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
@@ -186,15 +187,16 @@ def replace_image_in_zip(zip_path, image_name, crop):
                 else:
                     zout.writestr(image_name, buf.getvalue())
 
-        os.replace(tmp_path, zip_path)
+        # Move the temp file to the desired location
+        shutil.move(tmp_path, zip_path)
     except Exception as e:
-        print(f"Une erreur s'est produite : {e}")
+        print(f"Error : {e}")
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path) 
+ 
 
-
-def CV_Save_image_to_avif(img, output_path, quality=80):
+def CV_Save_image_to_avif(output_path, img, quality=90):
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(img_rgb)
     pil_img.save(output_path, 'AVIF', quality=quality)
@@ -204,6 +206,20 @@ def CV_Load_image_avif(path):
     img_np = np.array(pil_img)
     img_cv = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
     return img_cv
+
+def CV_Save_image(output_path, img, quality=90):
+    output_path_str = str(output_path).lower()      
+    if output_path_str.endswith('.heif'):
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(img_rgb)
+        pil_img.save(output_path_str, 'HEIF', quality=quality)
+    elif output_path_str.endswith('.avif'):
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(img_rgb)
+        pil_img.save(output_path_str, 'AVIF', quality=quality)  
+    else:   
+        cv2.imwrite(output_path_str, img)
+
 
 def CV_Sharpen2d(source, alpha, gamma, num_op):
     def sharpen_kernel(src):
@@ -714,7 +730,7 @@ def get_cropped_image_num(image,num):
     c_top = 0
     c_bottom = h
     
-    print("num="+str(num))
+    #print("num="+str(num))
     
     if (num==1):
         c_top = max(int (h * 0.1),144) 
@@ -896,7 +912,7 @@ def CropImage(path_in, img = None):
                         outputName = "Crop"
                         outputName = f"{outputName}_{date_time}.jpg"
                         outputName = Path(new_path) / outputName
-                        cv2.imwrite(outputName, crop) 
+                        CV_Save_image(outputName, crop)
                         print("Cropped image saved to:", outputName)
                         numState = 1
                         
@@ -906,7 +922,7 @@ def CropImage(path_in, img = None):
                         new_path .mkdir(parents=True, exist_ok=True)
                         outputName = os.path.basename(path_in)
                         outputName = Path(new_path) / outputName
-                        cv2.imwrite(outputName, crop) 
+                        CV_Save_image(outputName, crop)
                         print("Cropped image saved to:", outputName)
                         numState = 1
                         
@@ -915,9 +931,8 @@ def CropImage(path_in, img = None):
                             path = Path(path_in).parent
                             outputName = os.path.basename(path_in)
                             outputName = Path(path) / outputName
-                            cv2.imwrite(outputName, crop) 
-                            print("Cropped image saved to:", outputName)
-                            
+                            CV_Save_image(outputName, crop)
+              
                             # Update Thumb in Zip
                             height2, width2 = crop.shape[:2]
                             Lh = 540
@@ -1149,7 +1164,7 @@ def view_picture_zoom(image_path, qAddBackground):
             outputName = "Noname"
             outputName = f"{outputName}_{date_time}.jpg"
             outputName = Path(new_path) / outputName
-            cv2.imwrite(outputName, zoomed_img)
+            CV_Save_image(outputName, zoomed_img)
             
         elif key == ord('S'):
             path = Path(image_path).parent
@@ -1157,7 +1172,27 @@ def view_picture_zoom(image_path, qAddBackground):
             new_path .mkdir(parents=True, exist_ok=True)
             outputName = os.path.basename(image_path)
             outputName = Path(new_path) / outputName
-            cv2.imwrite(outputName, zoomed_img)
+            CV_Save_image(outputName, zoomed_img)
+            
+        if key == ord('T'):
+            if image_path.lower().endswith(IMAGE_EXTENSIONS):
+                path = Path(image_path).parent
+                outputName = os.path.basename(image_path)
+                outputName = Path(path) / outputName
+                
+                #print("outputName="+str(outputName))
+                CV_Save_image(outputName, zoomed_img)
+                
+                # Update Thumb in Zip
+                height2, width2 = zoomed_img.shape[:2]
+                Lh = 540
+                ratio2 = Lh / height2        
+                w2, h2 = int(width2 * ratio2), Lh                        
+                imgThumb2 = cv2.resize(zoomed_img, (w2, h2), interpolation=cv2.INTER_LINEAR)                                       
+                base_name2 = os.path.basename(image_path)
+                fileZipCache = os.path.join(path, "cache_thumbs.zip")
+                replace_image_in_zip(fileZipCache, base_name2+".avif", imgThumb2)
+                numState = 3
         
         elif key == ord('x'): qSharpen = not qSharpen
         elif key == ord('e'): qEnhanceColor = not qEnhanceColor
