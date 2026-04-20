@@ -168,33 +168,32 @@ def has_cache_config_changed(cache_dir, cols, rows, mode, thumb_format):
             or config.get('thumb_format') != thumb_format)
 
 
- 
 def replace_image_in_zip(zip_path, image_name, crop):
+    zip_path = Path(zip_path)
+
     try:
         crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(crop)
+
         buf = io.BytesIO()
         img.save(buf, format="AVIF")
-        buf.seek(0)
+        data = buf.getvalue()
 
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".zip")
-        os.close(tmp_fd)
+        with tempfile.TemporaryDirectory(dir=zip_path.parent) as temp_dir:
+            tmp_zip = Path(temp_dir) / zip_path.name
 
-        with zipfile.ZipFile(zip_path, "r") as zin, zipfile.ZipFile(tmp_path, "w") as zout:
-            for item in zin.infolist():
-                if item.filename != image_name:
-                    zout.writestr(item, zin.read(item.filename))
-                else:
-                    zout.writestr(image_name, buf.getvalue())
+            with zipfile.ZipFile(zip_path, "r") as zin, zipfile.ZipFile(tmp_zip, "w") as zout:
+                for item in zin.infolist():
+                    if item.filename == image_name:
+                        zout.writestr(item, data)
+                    else:
+                        zout.writestr(item, zin.read(item.filename))
 
-        # Move the temp file to the desired location
-        shutil.move(tmp_path, zip_path)
+            os.replace(tmp_zip, zip_path)
+
     except Exception as e:
-        print(f"Error : {e}")
-    finally:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path) 
- 
+        print(f"Error: {e}")
+
 
 def CV_Save_image_to_avif(output_path, img, quality=90):
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
