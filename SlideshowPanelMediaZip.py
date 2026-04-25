@@ -258,6 +258,75 @@ def CV_AdjustBrightnessContrast(img,brightness=10,contrast=2.3):
     return imgR
 
 
+def CV_AutoBrightnessContrast(img, clip_hist_percent=1.0):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    hist = cv2.calcHist([gray], [0], None, [256], [0, 256]).ravel()
+    accumulator = np.cumsum(hist)
+    maximum = accumulator[-1]
+    clip_value = (clip_hist_percent / 100.0) * maximum / 2.0
+    minimum_gray = np.searchsorted(accumulator, clip_value)
+    maximum_gray = np.searchsorted(accumulator, maximum - clip_value)
+    if maximum_gray <= minimum_gray:
+        return img
+    alpha = 255.0 / (maximum_gray - minimum_gray)
+    beta = -minimum_gray * alpha
+    out = cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
+    return out
+
+def CV_AdjustSaturation(img, sat_factor=1.10):
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
+    hsv[:, :, 1] *= sat_factor
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1], 0, 255)
+    return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+
+def CV_ClaheLuminance(img, clip_limit=2.0, tile_grid_size=(8, 8)):
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
+    l = clahe.apply(l)
+    lab = cv2.merge([l, a, b])
+    return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+def CV_Denoise(img, h=6):
+    return cv2.fastNlMeansDenoisingColored(img, None, h, h, 7, 21)
+
+def CV_AutoLevels(img):
+    out = []
+    for c in cv2.split(img):
+        p1, p99 = np.percentile(c, (1, 99))
+        if p99 - p1 < 1:
+            out.append(c)
+        else:
+            c2 = np.clip((c - p1) * 255.0 / (p99 - p1), 0, 255).astype(np.uint8)
+            out.append(c2)
+    return cv2.merge(out)
+
+def CV_Sharpen(img, amount=1.0):
+    kernel = np.array([[0, -1, 0],
+                       [-1, 5 + amount, -1],
+                       [0, -1, 0]], dtype=np.float32)
+    return cv2.filter2D(img, -1, kernel)
+
+def CV_GammaCorrection(img, gamma=1.0):
+    inv = 1.0 / gamma
+    table = np.array([(i / 255.0) ** inv * 255 for i in range(256)]).astype("uint8")
+    return cv2.LUT(img, table)
+
+def CV_AutoEnhanceLevel1(img):
+    # 1.0 2.0 8 8 1.08
+    img = CV_AutoBrightnessContrast(img, clip_hist_percent=0.5)
+    img = CV_ClaheLuminance(img, clip_limit=1.0, tile_grid_size=(8, 8))
+    img = CV_AdjustSaturation(img, sat_factor=1.08)
+    return img
+
+def CV_AutoEnhanceLevel2(img):
+    img = CV_AutoLevels(img)
+    img = CV_ClaheLuminance(img, clip_limit=2.0, tile_grid_size=(8, 8))
+    img = CV_GammaCorrection(img, gamma=1.05)
+    img = CV_Denoise(img, h=5)
+    img = CV_Sharpen(img, amount=0.6)
+    return img
+
 def CV_AdaptativeContrast(img,clip=9):
     lab=cv2.cvtColor(img,cv2.COLOR_BGR2LAB)
     l,a,b=cv2.split(lab)
@@ -380,10 +449,12 @@ def CV_AdvancedPointillism(img, num_colors=20, dot_radius=None, step=None):
 
     return canvas
 
+
 def CV_SingleScaleRetinex(img, sigma):
     blur = cv2.GaussianBlur(img, (0, 0), sigma)
     retinex = np.log10(img) - np.log10(blur + 1.0)
     return retinex
+
 
 def CV_MultiScaleRetinex(img, sigma_list):
     retinex = np.zeros_like(img)
@@ -391,6 +462,7 @@ def CV_MultiScaleRetinex(img, sigma_list):
         retinex += CV_SingleScaleRetinex(img, sigma)
     retinex /= len(sigma_list)
     return retinex
+
 
 def CV_NormalizeRetinex(retinex):
     out = np.zeros_like(retinex)
@@ -400,6 +472,7 @@ def CV_NormalizeRetinex(retinex):
             channel, None, 0, 255, cv2.NORM_MINMAX
         )
     return out.astype(np.uint8)
+
 
 def CV_Retinex(
     img_bgr,
@@ -956,6 +1029,10 @@ def CropImage(path_in, img = None):
             else:
                 print("No area selected.")
 
+
+        if key == ord('e'):
+            img = CV_Erase_zone_circle(img)
+
         if key == 27:
             break
         
@@ -1009,6 +1086,9 @@ def view_picture_zoom(image_path, qAddBackground):
 
     qFlipH = False
     qFlipV = False
+    
+    qAutoEnhance = False
+    levelAutoEnhance = 1
     
     
     def mouse_callback(event, x, y, flags, param):
@@ -1145,6 +1225,13 @@ def view_picture_zoom(image_path, qAddBackground):
         
         if qFlipH : zoomed_img = cv2.flip(zoomed_img, 0)
         if qFlipV : zoomed_img = cv2.flip(zoomed_img, 1)
+        
+        if qAutoEnhance :
+            if levelAutoEnhance==1:
+                zoomed_img = CV_AutoEnhanceLevel1(zoomed_img)
+            if levelAutoEnhance==2:
+                zoomed_img = CV_AutoEnhanceLevel2(zoomed_img)
+                
             
         if qAnaglyph and levelAnaglyph==0:
             zoomed_img = CV_Stereo_Anaglyph_Color(zoomed_img, qStereoImage, parallax_offset)
@@ -1219,6 +1306,13 @@ def view_picture_zoom(image_path, qAddBackground):
         
         elif key == ord('7'): qFlipH = not qFlipH
         elif key == ord('9'): qFlipV = not qFlipV
+        
+        elif key == ord('z'): 
+            qAutoEnhance = not qAutoEnhance
+            levelAutoEnhance=1
+        elif key == ord('Z'): 
+            qAutoEnhance = not qAutoEnhance
+            levelAutoEnhance=2
         
         elif key == ord('C'): numState = CropImage(image_path, zoomed_img)
         
