@@ -258,6 +258,10 @@ def CV_AdjustBrightnessContrast(img,brightness=10,contrast=2.3):
     return imgR
 
 
+def CV_AdjustBrightnessContrastBeta(img, alpha=1.0, beta=0):
+    out = img.astype(np.float32) * alpha + beta
+    return np.clip(out, 0, 255).astype(np.uint8)
+
 def CV_AutoBrightnessContrast(img, clip_hist_percent=1.0):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     hist = cv2.calcHist([gray], [0], None, [256], [0, 256]).ravel()
@@ -312,10 +316,36 @@ def CV_GammaCorrection(img, gamma=1.0):
     table = np.array([(i / 255.0) ** inv * 255 for i in range(256)]).astype("uint8")
     return cv2.LUT(img, table)
 
-def CV_AutoEnhanceLevel1(img):
+
+def CV_ImageStats(img):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    mean = float(gray.mean())
+    bright_ratio = float((gray >= 240).mean())
+    dark_ratio = float((gray <= 15).mean())
+    return mean, bright_ratio, dark_ratio
+
+def CV_AutoEnhanceLevel1Alpha(img):
     # 1.0 2.0 8 8 1.08
     img = CV_AutoBrightnessContrast(img, clip_hist_percent=0.5)
     img = CV_ClaheLuminance(img, clip_limit=1.0, tile_grid_size=(8, 8))
+    img = CV_AdjustSaturation(img, sat_factor=1.08)
+    return img
+
+def CV_AutoEnhanceLevel1Beta(img):
+    mean, bright_ratio, dark_ratio = CV_ImageStats(img)
+    if mean > 185 or bright_ratio > 0.10:
+        alpha = 0.90
+        beta = -12
+        img = CV_AdjustBrightnessContrast(img, alpha=alpha, beta=beta)
+        img = CV_ClaheLuminance(img, clip_limit=1.4)
+    elif mean < 90 or dark_ratio > 0.15:
+        alpha = 1.12
+        beta = 10
+        img = CV_AdjustBrightnessContrast(img, alpha=alpha, beta=beta)
+        img = CV_ClaheLuminance(img, clip_limit=2.0)
+    else:
+        img = CV_ClaheLuminance(img, clip_limit=1.8)
+
     img = CV_AdjustSaturation(img, sat_factor=1.08)
     return img
 
@@ -1228,7 +1258,8 @@ def view_picture_zoom(image_path, qAddBackground):
         
         if qAutoEnhance :
             if levelAutoEnhance==1:
-                zoomed_img = CV_AutoEnhanceLevel1(zoomed_img)
+                #zoomed_img = CV_AutoEnhanceLevel1Alpha(zoomed_img)
+                zoomed_img = CV_AutoEnhanceLevel1Beta(zoomed_img)
             if levelAutoEnhance==2:
                 zoomed_img = CV_AutoEnhanceLevel2(zoomed_img)
                 
