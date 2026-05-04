@@ -246,7 +246,7 @@ def CV_EnhanceColor(img):
     return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
 
 
-def CV_Vibrance2D(img, saturation_scale=1.3, brightness_scale=1.1, apply=True):
+def CV_Vibrance2D(img, saturation_scale=1.3, brightness_scale=1.1):
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
     hsv[..., 1] = np.clip(hsv[..., 1] * saturation_scale, 0, 255)
     hsv[..., 2] = np.clip(hsv[..., 2] * brightness_scale, 0, 255)
@@ -336,17 +336,22 @@ def CV_AutoEnhanceLevel1Beta(img):
     if mean > 185 or bright_ratio > 0.10:
         alpha = 0.90
         beta = -12
-        img = CV_AdjustBrightnessContrast(img, alpha=alpha, beta=beta)
-        img = CV_ClaheLuminance(img, clip_limit=1.4)
+        #img = CV_AdjustBrightnessContrastBeta(img, alpha=alpha, beta=beta)
+        #img = CV_ClaheLuminance(img, clip_limit=1.4)
     elif mean < 90 or dark_ratio > 0.15:
         alpha = 1.12
         beta = 10
-        img = CV_AdjustBrightnessContrast(img, alpha=alpha, beta=beta)
-        img = CV_ClaheLuminance(img, clip_limit=2.0)
+        #img = CV_AdjustBrightnessContrastBeta(img, alpha=alpha, beta=beta)
+        #img = CV_ClaheLuminance(img, clip_limit=2.0)
     else:
-        img = CV_ClaheLuminance(img, clip_limit=1.8)
+        #img = CV_ClaheLuminance(img, clip_limit=1.8)
+        img = CV_ClaheLuminance(img, clip_limit=1.0)
+
+
+    #img = CV_AutoBrightnessContrast(img, clip_hist_percent=0.5)
 
     img = CV_AdjustSaturation(img, sat_factor=1.08)
+    img = CV_Vibrance2D(img)
     return img
 
 def CV_AutoEnhanceLevel2(img):
@@ -995,6 +1000,11 @@ def CropImage(path_in, img = None):
     while qLoop:
         cv2.imshow(window_name, img)
         key = cv2.waitKey(1) & 0xFF
+                    
+        if key == ord('E'):
+            img = CV_Erase_zone_circle(img)
+            clone = img.copy()
+        
         if key in (ord('s'), ord('S'), ord('T')):
             if rect_start is not None and rect_end is not None:
                 x1, y1 = rect_start
@@ -1004,6 +1014,12 @@ def CropImage(path_in, img = None):
                 y_min, y_max = sorted([y1, y2])
 
                 if x_max > x_min and y_max > y_min:
+                    
+                    x_min = max(0,x_min)
+                    y_min = max(0,y_min)
+                    x_max = min(x_max,width) 
+                    y_max = min(y_max,height) 
+                    
                     crop = clone[y_min:y_max, x_min:x_max] 
                     
                     if key == ord('s'):
@@ -1058,10 +1074,6 @@ def CropImage(path_in, img = None):
                     print("Invalid rectangle, no cropping applied.")
             else:
                 print("No area selected.")
-
-
-        if key == ord('e'):
-            img = CV_Erase_zone_circle(img)
 
         if key == 27:
             break
@@ -1258,10 +1270,11 @@ def view_picture_zoom(image_path, qAddBackground):
         
         if qAutoEnhance :
             if levelAutoEnhance==1:
-                #zoomed_img = CV_AutoEnhanceLevel1Alpha(zoomed_img)
-                zoomed_img = CV_AutoEnhanceLevel1Beta(zoomed_img)
+                zoomed_img = CV_AutoEnhanceLevel1Alpha(zoomed_img)
+                #zoomed_img = CV_AutoEnhanceLevel1Beta(zoomed_img)
             if levelAutoEnhance==2:
-                zoomed_img = CV_AutoEnhanceLevel2(zoomed_img)
+                #zoomed_img = CV_AutoEnhanceLevel2(zoomed_img)
+                zoomed_img = CV_AutoEnhanceLevel1Beta(zoomed_img)
                 
             
         if qAnaglyph and levelAnaglyph==0:
