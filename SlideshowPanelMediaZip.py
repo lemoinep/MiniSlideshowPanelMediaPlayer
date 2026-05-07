@@ -112,6 +112,17 @@ def load_image_from_zip(zip_path, name):
         data = zipf.read(name)
         return Image.open(BytesIO(data))
 
+
+def move_file_to_dustbin(file_path):
+    file_path = Path(file_path)
+    parent_path = file_path.parent
+    dustbin_path = parent_path / "Dustbin"
+    dustbin_path.mkdir(parents=True, exist_ok=True)
+    destination = dustbin_path / file_path.name
+    shutil.move(str(file_path), str(destination))
+    return destination
+
+
 def purge_zip_except_config(zip_path):
 
     if not os.path.isfile(zip_path) or not is_zipfile(zip_path):
@@ -1284,6 +1295,7 @@ def view_picture_zoom(image_path, qAddBackground):
         cv2.imshow(window_name, zoomed_img)
 
         key = cv2.waitKey(20) & 0xFF
+        
         if key == 27:
             break
         elif key == ord('s'):
@@ -1323,6 +1335,16 @@ def view_picture_zoom(image_path, qAddBackground):
                 fileZipCache = os.path.join(path, "cache_thumbs.zip")
                 replace_image_in_zip(fileZipCache, base_name2+".avif", imgThumb2)
                 numState = 3
+                
+        #if key == 127:# Delete
+        if key == ord('W'):
+            if image_path.lower().endswith(IMAGE_EXTENSIONS):
+                path = Path(image_path).parent
+                outputName = os.path.basename(image_path)
+                outputName = Path(path) / outputName
+                moved_file = move_file_to_dustbin(outputName)
+                print(f"Delete : {moved_file}")
+                break
         
         elif key == ord('x'): qSharpen = not qSharpen
         elif key == ord('e'): qEnhanceColor = not qEnhanceColor
@@ -3399,8 +3421,11 @@ class Slideshow:
         page_count = pdf_document.page_count
         pdf_document.close()
         return page_count
-
+    
     def get_creation_date(self, file_path):
+        file_path = Path(file_path)
+        if not file_path.exists():
+            return ""
         return datetime.datetime.fromtimestamp(os.path.getctime(file_path)).strftime("%d/%m/%Y %H:%M")
 
     def setup_ui(self):
@@ -3459,7 +3484,9 @@ class Slideshow:
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_player(path))
                     self.canvas.create_text(x+w//2, y+h//2+2, text="▶", fill="black", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
-                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_video_duration(file_path)}  |  {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    date_text = self.get_creation_date(file_path)
+                    if date_text:
+                        self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_video_duration(file_path)}  |  {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
 
                 elif ext in SOUND_EXTENSIONS:
                     img = self.audio_placeholder_img.copy()
@@ -3475,7 +3502,9 @@ class Slideshow:
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_audio_player(path))
                     self.canvas.create_text(x+w//2, y+h//2+2, text="▶", fill="black", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
-                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_audio_length(file_path):.2f} s | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    date_text = self.get_creation_date(file_path)
+                    if date_text:
+                        self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_audio_length(file_path):.2f} s | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
                     base_name = os.path.splitext(os.path.basename(file_path))[0]
                     self.canvas.create_text(x+w//2+2, y+h//2+50+2, text=f"{base_name}", fill="black", font=("Helvetica", max(10, w//30), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2+50, text=f"{base_name}", fill="white", font=("Helvetica", max(10, w//30), "bold"))
@@ -3494,7 +3523,9 @@ class Slideshow:
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_txt_viewer(path))
                     self.canvas.create_text(x+w//2, y+h//2+2, text="▶", fill="black", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
-                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    date_text = self.get_creation_date(file_path)
+                    if date_text:
+                        self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
                     base_name = os.path.splitext(os.path.basename(file_path))[0]
                     self.canvas.create_text(x+w//2+2, y+h//2+50+2, text=f"{base_name}", fill="black", font=("Helvetica", max(10, w//30), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2+50, text=f"{base_name}", fill="white", font=("Helvetica", max(10, w//30), "bold"))
@@ -3513,7 +3544,9 @@ class Slideshow:
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_md_viewer(path))
                     self.canvas.create_text(x+w//2, y+h//2+2, text="▶", fill="black", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
-                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    date_text = self.get_creation_date(file_path)
+                    if date_text:
+                        self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
                     base_name = os.path.splitext(os.path.basename(file_path))[0]
                     self.canvas.create_text(x+w//2+2, y+h//2+50+2, text=f"{base_name}", fill="black", font=("Helvetica", max(10, w//30), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2+50, text=f"{base_name}", fill="white", font=("Helvetica", max(10, w//30), "bold"))
@@ -3532,7 +3565,9 @@ class Slideshow:
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_pdf_player(path))
                     self.canvas.create_text(x+w//2, y+h//2+2, text="▶", fill="black", font=("Helvetica", max(20, w//6), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2, text="▶", fill="white", font=("Helvetica", max(20, w//6), "bold"))
-                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_pdf_page_count(file_path)} Pg | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    date_text = self.get_creation_date(file_path)
+                    if date_text:
+                        self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_pdf_page_count(file_path)} Pg | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
                     base_name = os.path.splitext(os.path.basename(file_path))[0]
                     self.canvas.create_text(x+w//2+2, y+h//2+50+2, text=f"{base_name}", fill="black", font=("Helvetica", max(10, w//30), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2+50, text=f"{base_name}", fill="white", font=("Helvetica", max(10, w//30), "bold"))
@@ -3549,7 +3584,13 @@ class Slideshow:
                     img_id = self.canvas.create_image(x, y, anchor="nw", image=photo_img)
                     self.image_refs.append(photo_img)
                     self.canvas.tag_bind(img_id, "<Button-1>", lambda e, path=file_path: self.open_with_default_image_viewer(path))
-                    self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    date_text = self.get_creation_date(file_path)
+                    if date_text:
+                        self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    else :
+                        self.canvas.create_text(x+w//2, y+h+20, text="File deleted", fill="red", font=("Helvetica", 8, "bold"))
+                        
+
         self.slider.set(self.current_image)
 
 
