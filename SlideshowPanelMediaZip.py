@@ -2514,6 +2514,8 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
+    
+    print("fps ="+str(fps))
     if fps == 0:
         fps = 30 
 
@@ -2719,16 +2721,17 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
             paused = True
 
             
-        key = cv2.waitKey(int(1000 / fps)) & 0xFF
+        key = cv2.waitKey(max(1,int(1000 / fps))) & 0xFF
         if key == 27:  
             break
         elif key == ord(' '): 
             paused = not paused
-            #pausedLevel = 0
+
         elif key == ord('2'): fps = fps_movie
         elif key == ord('1'): fps = max ( 1, fps // 2)
         elif key == ord('2'): fps = fps_movie
         elif key == ord('3'): fps = fps * 2
+
         elif key == ord('+'): 
             current_frame = current_frame + 1
             pausedLevel = 0
@@ -2758,6 +2761,19 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
             outputName = f"{outputName}_{date_time}.jpg"
             outputName = Path(new_path) / outputName
             cv2.imwrite(outputName, zoomed_img)
+            
+        #if key == 127:# Delete
+        if key == ord('W'):
+            if video_path.lower().endswith(VIDEO_EXTENSIONS):
+                cap.release()
+                path = Path(video_path).parent
+                outputName = os.path.basename(video_path)
+                outputName = Path(path) / outputName
+                moved_file = move_file_to_dustbin(outputName)
+                print(f"Delete : {moved_file}")
+                cv2.destroyAllWindows()
+                time.sleep(500/1000)
+                break
             
         elif key == ord('x'): qSharpen = not qSharpen
         elif key == ord('e'): qEnhanceColor = not qEnhanceColor
@@ -3294,6 +3310,7 @@ class Slideshow:
         if self.nb_media < self.panel_cols * self.panel_rows:
             self.panel_cols = math.ceil(math.sqrt(self.nb_media))
             self.panel_rows = math.ceil(self.nb_media / self.panel_cols)
+            
 
     def shadow(self, x, y, w, h):
         colors = [(30, 30, 30, 10), (20, 20, 20, 8), (10, 10, 10, 5)]
@@ -3487,6 +3504,8 @@ class Slideshow:
                     date_text = self.get_creation_date(file_path)
                     if date_text:
                         self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_video_duration(file_path)}  |  {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    else :
+                        self.canvas.create_text(x+w//2, y+h+20, text="File deleted", fill="red", font=("Helvetica", 8, "bold"))
 
                 elif ext in SOUND_EXTENSIONS:
                     img = self.audio_placeholder_img.copy()
@@ -3505,6 +3524,8 @@ class Slideshow:
                     date_text = self.get_creation_date(file_path)
                     if date_text:
                         self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_audio_length(file_path):.2f} s | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    else :
+                        self.canvas.create_text(x+w//2, y+h+20, text="File deleted", fill="red", font=("Helvetica", 8, "bold"))
                     base_name = os.path.splitext(os.path.basename(file_path))[0]
                     self.canvas.create_text(x+w//2+2, y+h//2+50+2, text=f"{base_name}", fill="black", font=("Helvetica", max(10, w//30), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2+50, text=f"{base_name}", fill="white", font=("Helvetica", max(10, w//30), "bold"))
@@ -3526,6 +3547,8 @@ class Slideshow:
                     date_text = self.get_creation_date(file_path)
                     if date_text:
                         self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    else :
+                        self.canvas.create_text(x+w//2, y+h+20, text="File deleted", fill="red", font=("Helvetica", 8, "bold"))
                     base_name = os.path.splitext(os.path.basename(file_path))[0]
                     self.canvas.create_text(x+w//2+2, y+h//2+50+2, text=f"{base_name}", fill="black", font=("Helvetica", max(10, w//30), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2+50, text=f"{base_name}", fill="white", font=("Helvetica", max(10, w//30), "bold"))
@@ -3547,6 +3570,8 @@ class Slideshow:
                     date_text = self.get_creation_date(file_path)
                     if date_text:
                         self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    else :
+                        self.canvas.create_text(x+w//2, y+h+20, text="File deleted", fill="red", font=("Helvetica", 8, "bold"))
                     base_name = os.path.splitext(os.path.basename(file_path))[0]
                     self.canvas.create_text(x+w//2+2, y+h//2+50+2, text=f"{base_name}", fill="black", font=("Helvetica", max(10, w//30), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2+50, text=f"{base_name}", fill="white", font=("Helvetica", max(10, w//30), "bold"))
@@ -3568,6 +3593,8 @@ class Slideshow:
                     date_text = self.get_creation_date(file_path)
                     if date_text:
                         self.canvas.create_text(x+w//2, y+h+20, text=f"{self.get_pdf_page_count(file_path)} Pg | {self.get_creation_date(file_path)}", fill="white", font=("Helvetica", 8, "bold"))
+                    else :
+                        self.canvas.create_text(x+w//2, y+h+20, text="File deleted", fill="red", font=("Helvetica", 8, "bold"))
                     base_name = os.path.splitext(os.path.basename(file_path))[0]
                     self.canvas.create_text(x+w//2+2, y+h//2+50+2, text=f"{base_name}", fill="black", font=("Helvetica", max(10, w//30), "bold"))
                     self.canvas.create_text(x+w//2, y+h//2+50, text=f"{base_name}", fill="white", font=("Helvetica", max(10, w//30), "bold"))
@@ -3604,6 +3631,8 @@ class Slideshow:
                 subprocess.Popen(['xdg-open', video_path])
         else :
             play_video_with_seek_and_pause(video_path,self.qModeBackground)
+            # Key T or W
+            self.show_image()
             
     def open_with_default_pdf_player(self, pdf_path):
         if self.qModeSoftwareView:
@@ -3626,7 +3655,7 @@ class Slideshow:
                 subprocess.Popen(['xdg-open', image_path])        
         else :
             view_picture_zoom(image_path,self.qModeBackground)
-            # Key T
+            # Key T or W
             self.show_image()
 
     def open_with_default_audio_player(self, audio_path):
