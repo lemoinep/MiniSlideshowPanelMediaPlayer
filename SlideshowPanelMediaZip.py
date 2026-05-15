@@ -3186,7 +3186,7 @@ def sub_process_files(name_file_zip, directory, format, workers, quality=90, hei
 #------------------------------------------------------------------------------
 
 class Slideshow:
-    def __init__(self, master, directory, panel_cols, panel_rows, mode, workers, qcache=False,thumb_format="PNG", thumbSizeCache=540, SortFiles="NAME", qModeSoftwareView=True):
+    def __init__(self, master, directory, panel_cols, panel_rows, mode, workers, qcache=False,thumb_format="PNG", thumbSizeCache=540, thumbQuality=90, SortFiles="NAME", qModeSoftwareView=True):
         self.master = master
         self.directory = directory
         self.panel_cols = panel_cols
@@ -3195,6 +3195,7 @@ class Slideshow:
         self.workers = workers
         self.qcache = qcache
         self.thumbSizeCache = thumbSizeCache
+        self.thumbQuality = thumbQuality
         self.qModeSoftwareView = qModeSoftwareView
         self.qModeBackground = False
         self.thumb_format = thumb_format.upper()
@@ -3250,7 +3251,7 @@ class Slideshow:
             self.directory,
             self.thumb_format,
             self.workers,
-            90,
+            self.thumbQuality,
             self.thumbSizeCache,
             True,
             self.mode)
@@ -3748,7 +3749,7 @@ if __name__ == "__main__":
     parser.add_argument('--QModeSoftwareView', type=int, default=1, help='Enable ModeSoftwareView')
     
     parser.add_argument('--ThumbSizeCache', type=int, default=540, help='ThumbSizeCache')
-    
+    parser.add_argument('--ThumbQuality', type=int, default=90, help='ThumbQuality')
     parser.add_argument('--ThumbFormat', type=str, choices=["JPG", "PNG", "HEIF", "AVIF"], default="PNG",
                        help="Format for saved thumbnails (JPG, PNG, HEIF, AVIF)")
     parser.add_argument('--SortFiles', type=str, choices=["NAME", "DATE"], default="NAME",
@@ -3761,6 +3762,7 @@ if __name__ == "__main__":
                           args.QCache, 
                           args.ThumbFormat, 
                           args.ThumbSizeCache, 
+                          args.ThumbQuality, 
                           args.SortFiles, 
                           args.QModeSoftwareView)
     root.mainloop()
