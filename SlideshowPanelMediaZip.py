@@ -4,7 +4,7 @@
 
 import tkinter as tk
 from tkinter import scrolledtext
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageSequence
 import os
 import sys
 import subprocess
@@ -420,7 +420,7 @@ def CV_Entropy(img, block_size=(32, 32)):
         for x in range(n_blocks_x):
             block = gray_img[y*bh:(y+1)*bh, x*bw:(x+1)*bw]
             hist, _ = np.histogram(block, bins=256, range=(0,256), density=True)
-            hist = hist + 1e-7  # pour éviter log(0)
+            hist = hist + 1e-7  
             entrop_map[y, x] = -np.sum(hist * np.log2(hist))
 
     entrop_map_norm = cv2.normalize(entrop_map, None, 0, 255, cv2.NORM_MINMAX)
@@ -1388,6 +1388,103 @@ def view_picture_zoom(image_path, qAddBackground):
     cv2.destroyAllWindows()
     time.sleep(500/1000)
     
+#------------------------------------------------------------------------------
+
+def view_animated_gif(gif_path):
+    im = Image.open(gif_path)
+
+    frames = []
+    durations = []
+    for frame in ImageSequence.Iterator(im):
+        frames.append(frame.convert("RGB"))
+        durations.append(frame.info.get("duration", 100))  # ms par défaut
+
+    if not frames:
+        return
+
+    cv_frames = []
+    for f in frames:
+        arr = np.array(f)
+        cv_frames.append(cv2.cvtColor(arr, cv2.COLOR_RGB2BGR))
+
+    height, width = cv_frames[0].shape[:2]
+    window_name = "GIF Player"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+
+    ratio = width / height
+    lh = 900
+    lw = int(lh * ratio)
+    cv2.resizeWindow(window_name, lw, lh)
+
+    zoom_scale = 1.0
+    zoom_min = 1.0
+    zoom_max = 10.0
+    mouse_x, mouse_y = width // 2, height // 2
+    paused = False
+    qLoop = True
+
+    def mouse_callback(event, x, y, flags, param):
+        nonlocal zoom_scale, mouse_x, mouse_y, qLoop, paused
+        mouse_x, mouse_y = x, y
+        if event == cv2.EVENT_MOUSEWHEEL:
+            if flags < 0:
+                zoom_scale = min(zoom_scale + 0.1, zoom_max)
+            else:
+                zoom_scale = max(zoom_scale - 0.1, zoom_min)
+        elif event == cv2.EVENT_LBUTTONDOWN:
+            paused = not paused
+        elif event == cv2.EVENT_RBUTTONDOWN:
+            qLoop = False
+
+    def get_zoomed_image(image, scale, center_x, center_y):
+        h, w = image.shape[:2]
+        new_w = int(w / scale)
+        new_h = int(h / scale)
+        left = max(center_x - new_w // 2, 0)
+        right = min(center_x + new_w // 2, w)
+        top = max(center_y - new_h // 2, 0)
+        bottom = min(center_y + new_h // 2, h)
+
+        if right - left < new_w:
+            if left == 0:
+                right = new_w
+            elif right == w:
+                left = w - new_w
+        if bottom - top < new_h:
+            if top == 0:
+                bottom = new_h
+            elif bottom == h:
+                top = h - new_h
+
+        cropped = image[top:bottom, left:right]
+        zoomed = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+        return zoomed
+
+    cv2.setMouseCallback(window_name, mouse_callback)
+
+    idx = 0
+    while qLoop:
+        frame = cv_frames[idx]
+
+        zoomed = get_zoomed_image(frame, zoom_scale, mouse_x, mouse_y)
+        cv2.imshow(window_name, zoomed)
+
+        delay = max(1, int(durations[idx]))  # ms
+        key = cv2.waitKey(delay) & 0xFF
+
+        if key == 27:
+            break
+        elif key == ord(' '):
+            paused = not paused
+        elif key == ord('.'):
+            zoom_scale = 1.0
+
+        if not paused:
+            idx = (idx + 1) % len(cv_frames)
+
+    cv2.destroyAllWindows()
+
+
 #------------------------------------------------------------------------------
 
 def view_pdf_zoom(pdf_path, dpi=300):
@@ -3647,6 +3744,18 @@ class Slideshow:
             view_pdf_zoom(pdf_path)
 
     def open_with_default_image_viewer(self, image_path):
+        if image_path.lower().endswith(('.gif','.GIF')):
+            if self.qModeSoftwareView: 
+                if sys.platform.startswith('darwin'):
+                    subprocess.Popen(['open', image_path])
+                elif os.name == 'nt':
+                    os.startfile(image_path)
+                elif os.name == 'posix':
+                    subprocess.Popen(['xdg-open', image_path])
+            else:
+                view_animated_gif(image_path)
+            return
+            
         if self.qModeSoftwareView:
             if sys.platform.startswith('darwin'):
                 subprocess.Popen(['open', image_path])
