@@ -1,14 +1,26 @@
-# Slideshow Panel Media
+# Panel Media Solution
 
-[![Version](https://img.shields.io/badge/version-2.1-green.svg)](https://github.com/lemoinep/MiniSlideshowPanelMediaPlayer)
+[![Version](https://img.shields.io/badge/version-1.1-green.svg)](https://github.com/lemoinep/MiniSlideshowPanelMediaPlayer)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
+[![Media](https://img.shields.io/badge/Media-player-blue.svg)]()
+[![Slideshow](https://img.shields.io/badge/Slideshow-images%20%26%20video-purple.svg)]()
+[![UI](https://img.shields.io/badge/UI-desktop-orange.svg)]()
+
 
 ---
 
-## Objective
+<p align="center">
+<img src="Images/P0001.jpg" width="100%" />
+</p>
 
-The program is an advanced multimedia viewer written in Python that can display and browse images, videos, PDFs, text files, and Markdown documents from folders or ZIP archives.
+---
+
+---
+
+
+
+The **Panel Media Solution** project is an advanced multimedia viewer written in Python that can display and browse images, videos, PDFs, text files, and Markdown documents from folders or ZIP archives.
 
 It uses Tkinter for the main interface, OpenCV and Pillow for image processing and video playback, PyMuPDF for PDF rendering, pygame/pydub for audio, and markdown-it to render Markdown as images. 
 

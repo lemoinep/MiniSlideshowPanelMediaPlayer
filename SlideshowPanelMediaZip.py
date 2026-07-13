@@ -2612,7 +2612,7 @@ def play_video_with_seek_and_pause(video_path, qAddBackground):
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     
-    print("fps ="+str(fps))
+    #print("fps ="+str(fps))
     if fps == 0:
         fps = 30 
 
